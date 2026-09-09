@@ -10,7 +10,7 @@
     "migrations_dir": "migrations"
   }],
   "r2_buckets": [{
-    "binding": "MEDIA",
+    "binding": "BUCKET",
     "bucket_name": "mexino-media"
   }],
   "assets": {

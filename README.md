@@ -1,6 +1,6 @@
 # Casa Mexino · Portal inmobiliario
 
-Primera versión del nuevo sitio de Casa Mexino, desarrollada con React, TypeScript y Vite para desplegarse en Cloudflare Pages.
+Portal y administración de inventario de Casa Mexino. React, TypeScript y Vite con API en Cloudflare Workers, D1 y R2. Acceso del equipo validado con Cloudflare Access.
 
 ## Desarrollo local
 
@@ -17,22 +17,22 @@ npm run build
 
 El resultado se genera en `dist/`.
 
-## Configuración en Cloudflare Pages
+## Configuración en Cloudflare Workers
 
-- Framework preset: `Vite`
 - Build command: `npm run build`
-- Build output directory: `dist`
+- Deploy command: `npx wrangler deploy`
+- Assets: `dist`
 - Root directory: `/`
 - Production branch: `main`
 
-Cuando el despliegue temporal de Pages funcione, se puede conectar `casamexino.com` desde **Workers & Pages → Custom domains**.
+Antes de publicar esta etapa, completar [la activación de D1, R2 y Access](docs/ACTIVACION.md). `npm run dev` sirve solo la interfaz; usar `wrangler dev` para la API local. Verificación automatizada: `npm test`.
 
 ## Estado actual
 
 - Portada adaptable a escritorio y móvil
-- Navegación por secciones
-- Buscador demostrativo de propiedades
-- Propiedades destacadas
-- Servicios, presentación y contacto
+- Catálogo con filtros, mapa de Matehuala y detalle de propiedad
+- Panel de propiedades, imágenes y fraccionamientos
+- Planos PDF/imagen con delimitación de lotes y disponibilidad
+- API con permisos, validación, revisiones concurrentes e historial
 
-Los inmuebles, precios y datos de contacto actuales son contenido demostrativo pendiente de validación.
+El inventario inicia vacío. Los anuncios ficticios anteriores no se importan. La fotografía de portada es ilustrativa. La cobranza, ventas y caja corresponden a la siguiente etapa; los acuerdos completos están en [Alcance](docs/ALCANCE.md).

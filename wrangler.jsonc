@@ -9,6 +9,10 @@
     "database_id": "52626bfb-0578-480c-9162-9470ee094661",
     "migrations_dir": "migrations"
   }],
+  "r2_buckets": [{
+    "binding": "MEDIA",
+    "bucket_name": "mexino-media"
+  }],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",

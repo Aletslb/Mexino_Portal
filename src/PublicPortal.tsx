@@ -5,7 +5,7 @@ import {api} from './api';
 import hero from './assets/hero-casa.webp';
 import PlanView from './PlanView';
 const MapView=lazy(()=>import('./MapView'));
-export function Brand(){return <a className="brand" href="/" aria-label="Casa Mexino, inicio"><span className="brand-symbol">m<span>·</span></span><span>casa<strong>mexino</strong></span></a>;}
+export function Brand(){return <a className="brand" href="/" aria-label="Casa Mexino, inicio"><img className="brand-logo" src="/logo-casa-mexino.png" alt="Casa Mexino · Gestión Inmobiliaria"/></a>;}
 function PropertyCard({p}:{p:Property}){return <a className="listing" href={`/propiedades/${p.id}`}><div className="listing-photo">{p.images[0]?<img src={p.images[0]} alt={p.title} loading="lazy"/>:<span>Sin fotografía</span>}<span className="tag">{p.operation} · {p.type}</span>{p.status!=='Disponible'&&<span className="status-tag">{p.status}</span>}</div><div className="listing-heading"><h3>{p.title}</h3><span aria-hidden>↗</span></div><p>{p.address||'Matehuala'}</p><div className="listing-bottom"><strong>{money(p.price)}{p.operation==='Renta'&&<small> / mes</small>}</strong><span>{p.area} m²</span></div></a>;}
 export default function PublicPortal(){
   const [data,setData]=useState<Catalog>(emptyCatalog),[loading,setLoading]=useState(true),[error,setError]=useState(''),[retry,setRetry]=useState(0);

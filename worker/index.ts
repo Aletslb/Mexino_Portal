@@ -1,6 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { Env } from './types';
-import type { Catalog, Property, Development, Lot } from '../src/model';
+import { defaultPortalSettings } from '../src/model';
+import type { Catalog, Property, Development, Lot, PortalSettings } from '../src/model';
 
 const json = (data: unknown, status=200) => Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 class Failure extends Error { constructor(public status: number, message: string) {super(message);} }
@@ -20,11 +21,18 @@ export async function identity(request: Request, env: Env) {
   if (!role) throw new Failure(403,'Tu cuenta no tiene acceso a Mexino.');
   return {email,role};
 }
-type Row={id:string;kind:keyof Catalog;data:string;revision:number};
+type RecordKind='properties'|'developments'|'lots';
+type Row={id:string;kind:RecordKind;data:string;revision:number};
+const settingsKey='portal/settings.json';
+async function portalSettings(env: Env): Promise<PortalSettings> {
+  if(!env.BUCKET)return {...defaultPortalSettings};
+  const object=await env.BUCKET.get(settingsKey);if(!object)return {...defaultPortalSettings};
+  try{return {...defaultPortalSettings,...await object.json<PortalSettings>()};}catch{return {...defaultPortalSettings};}
+}
 async function catalog(env: Env): Promise<Catalog> {
   if (!env.DB) throw new Failure(503,'El catálogo está pendiente de conexión.');
-  const {results}=await env.DB.prepare('SELECT id,kind,data,revision FROM records ORDER BY updated_at DESC').all<Row>();
-  const result: Catalog={properties:[],developments:[],lots:[]};
+  const [{results},settings]=await Promise.all([env.DB.prepare('SELECT id,kind,data,revision FROM records ORDER BY updated_at DESC').all<Row>(),portalSettings(env)]);
+  const result: Catalog={properties:[],developments:[],lots:[],settings};
   for(const row of results) (result[row.kind] as unknown[]).push({...JSON.parse(row.data),id:row.id,revision:row.revision});
   return result;
 }
@@ -33,7 +41,8 @@ export function publicCatalog(data: Catalog) {
   return {
     properties:data.properties.filter(x=>x.publication==='Publicado').map(({id,title,type,operation,price,area,bedrooms,bathrooms,description,address,lat,lng,images,status})=>({id,title,type,operation,price,area,bedrooms,bathrooms,description,address,lat,lng,images,status})),
     developments,
-    lots:data.lots.filter(x=>developments.some(d=>d.id===x.developmentId)).map(({id,developmentId,block,number,area,price,status,polygon})=>({id,developmentId,block,number,area,price,status,polygon}))
+    lots:data.lots.filter(x=>developments.some(d=>d.id===x.developmentId)).map(({id,developmentId,block,number,area,price,status,polygon})=>({id,developmentId,block,number,area,price,status,polygon})),
+    settings:data.settings
   };
 }
 function text(v: unknown, max=200, required=false) {if(typeof v!=='string'||v.length>max||(required&&!v.trim())) throw new Failure(400,'Revisa los textos obligatorios y su longitud.'); return v.trim();}
@@ -41,6 +50,26 @@ function number(v: unknown,max=1e10) {if(typeof v!=='number'||!Number.isFinite(v
 function choice<T extends string>(v: unknown, choices:T[]): T {if(!choices.includes(v as T)) throw new Failure(400,'Opción no válida.');return v as T;}
 const fileId=(s:string)=>s.match(/^\/media\/([a-f0-9-]{36})$/)?.[1];
 function media(v:unknown) {const s=text(v);if(s&&!fileId(s)) throw new Failure(400,'Sube el archivo desde el panel.');return s;}
+function localLink(v:unknown) {const s=text(v,500,true);if(!/^(\/|#)/.test(s)||s.startsWith('//'))throw new Failure(400,'Los botones deben dirigir a una sección del portal.');return s;}
+export function validateSettings(v:Record<string,unknown>):PortalSettings {
+  if(!Array.isArray(v.heroImages)||v.heroImages.length>3)throw new Failure(400,'La portada admite hasta 3 imágenes.');
+  const revision=number(v.revision,1e9);if(!Number.isInteger(revision))throw new Failure(400,'Versión no válida.');
+  return {
+    revision,
+    heroMode:choice(v.heroMode,['Imagen fija','Carrusel']),
+    heroImages:v.heroImages.map(media),
+    heroTitle:text(v.heroTitle,90,true),
+    heroAccent:text(v.heroAccent,100,true),
+    heroDescription:text(v.heroDescription,260,true),
+    primaryLabel:text(v.primaryLabel,45,true),
+    primaryUrl:localLink(v.primaryUrl),
+    secondaryLabel:text(v.secondaryLabel,45,true),
+    secondaryUrl:localLink(v.secondaryUrl),
+    imagePositionDesktop:choice(v.imagePositionDesktop,['center center','center top','center bottom','left center','right center']),
+    imagePositionMobile:choice(v.imagePositionMobile,['center center','center top','center bottom','left center','right center']),
+    phone:text(v.phone,35),whatsapp:text(v.whatsapp,35),email:text(v.email,160),address:text(v.address,240)
+  };
+}
 function commission(v:Record<string,unknown>) {const commissionType=choice(v.commissionType,['Porcentaje','Monto']);return {commissionType,commissionValue:number(v.commissionValue,commissionType==='Porcentaje'?100:1e10)};}
 export function validate(kind:string,v:Record<string,unknown>) {
   const base={id:text(v.id,36,true),revision:number(v.revision,1e9)};
@@ -83,6 +112,20 @@ async function save(request:Request,env:Env,user:{email:string;role:string},kind
   }catch(e){if(e instanceof Failure)throw e; if(String(e).includes('UNIQUE'))throw new Failure(409,'Ya existe ese lote en esta manzana.');throw e;}
   return json({...value,revision:value.revision+1});
 }
+async function saveSettings(request:Request,env:Env,user:{email:string;role:string}) {
+  if(user.role!=='Administrador')throw new Failure(403,'Solo administradores pueden cambiar el portal.');
+  if(!env.DB||!env.BUCKET)throw new Failure(503,'Los ajustes del portal están pendientes de conexión.');
+  const raw=await request.text();if(raw.length>50000)throw new Failure(413,'Configuración demasiado grande.');
+  let input:Record<string,unknown>;try{input=JSON.parse(raw);if(!input||typeof input!=='object'||Array.isArray(input))throw new Error();}catch{throw new Failure(400,'Datos no válidos.');}
+  const value=validateSettings(input),old=await portalSettings(env);
+  if(value.revision!==old.revision)throw new Failure(409,'Otro usuario actualizó el portal. Recarga antes de guardar.');
+  for(const link of value.heroImages)if(!await env.DB.prepare('SELECT id FROM uploads WHERE id=?').bind(fileId(link)).first())throw new Failure(400,'Una imagen de portada ya no está disponible. Vuelve a subirla.');
+  const saved={...value,revision:value.revision+1},before=old.revision?JSON.stringify(old):null,after=JSON.stringify(saved);
+  await env.BUCKET.put(settingsKey,after,{httpMetadata:{contentType:'application/json'}});
+  try{await env.DB.prepare('INSERT INTO audit(id,record_id,actor,action,before_data,after_data) VALUES(?,?,?,?,?,?)').bind(crypto.randomUUID(),'portal-settings',user.email,old.revision?'Actualizar portal':'Configurar portal',before,after).run();}
+  catch(e){console.error('Portal settings audit failed',e instanceof Error?e.message:'unknown');}
+  return json(saved);
+}
 async function upload(request:Request,env:Env,email:string) {
   if(!env.DB||!env.BUCKET)throw new Failure(503,'La carga de imágenes está pendiente de conexión.');
   const reader=request.body?.getReader();if(!reader)throw new Failure(400,'Archivo vacío.');
@@ -103,7 +146,7 @@ export default {
       if(path.startsWith('/media/')) {
         if(!['GET','HEAD'].includes(request.method))throw new Failure(405,'Método no permitido.');
         if(!env.BUCKET)throw new Failure(404,'Imagen no encontrada.');
-        const all=publicCatalog(await catalog(env));const allowed=all.properties.some(p=>p.images.includes(path))||all.developments.some(d=>d.plan===path);
+        const all=publicCatalog(await catalog(env));const allowed=all.properties.some(p=>p.images.includes(path))||all.developments.some(d=>d.plan===path)||all.settings.heroImages.includes(path);
         if(!allowed)await identity(request,env);
         const object=await env.BUCKET.get(path.slice(7));if(!object)throw new Failure(404,'Imagen no encontrada.');
         return new Response(request.method==='HEAD'?null:object.body,{headers:{'Content-Type':object.httpMetadata?.contentType||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'private, no-store'}});
@@ -119,6 +162,7 @@ export default {
           return json((await env.DB.prepare('SELECT id,record_id,actor,action,created_at FROM audit ORDER BY created_at DESC LIMIT 100').all()).results);
         }
         if(path==='/api/admin/uploads'&&request.method==='POST')return await upload(request,env,user.email);
+        if(path==='/api/admin/settings'&&request.method==='PUT')return await saveSettings(request,env,user);
         if(request.method==='PUT'&&/^\/api\/admin\/(properties|developments|lots)$/.test(path))return await save(request,env,user,path.split('/').pop()!);
         throw new Failure(404,'Acción no encontrada.');
       }

@@ -96,6 +96,36 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 @media(prefers-reduced-motion:reduce){.listing:hover,.button:hover,.start-actions button:hover{transform:none}}
 @media(forced-colors:active){.listing,.filters,.metrics>div,.button,.sidebar{border:1px solid CanvasText}}
 
+/* Identidad editorial inmobiliaria y configuración administrable. */
+.brand-copy{display:flex;flex-direction:column;gap:2px;border-left:1px solid #d8dee6;padding-left:14px;white-space:nowrap}
+.brand-copy strong{font-size:.94rem;letter-spacing:.02em;text-transform:uppercase;color:var(--navy);font-weight:750}
+.brand-copy small{font-size:.65rem;letter-spacing:.13em;text-transform:uppercase;color:#657489}
+.public-header .brand-logo{width:82px;height:64px}
+.editorial-hero .intro-copy:before{content:'';position:absolute;left:-22px;top:30px;width:3px;height:84px;background:linear-gradient(var(--red) 0 36%,var(--navy) 36%);border-radius:2px}
+.editorial-hero h1{max-width:680px}
+.hero-services{display:flex;flex-wrap:wrap;gap:0;margin-top:34px;padding-block:13px;border-block:1px solid #d5dde6;width:max-content;max-width:100%;font-size:.7rem;font-weight:720;letter-spacing:.09em;text-transform:uppercase;color:#344d6b}
+.hero-services span{padding:0 15px;border-right:1px solid #c7d1dc}
+.hero-services span:first-child{padding-left:0}.hero-services span:last-child{border:0;padding-right:0}
+.hero-footnote{margin-top:18px}
+.hero-dots{position:absolute;left:20px;bottom:18px;display:flex;gap:8px;padding:8px 10px;background:#0c2848cc;border-radius:20px}
+.hero-dots button{width:8px;height:8px;border:1px solid #fff;border-radius:50%;padding:0;background:transparent}
+.hero-dots button.active{width:24px;border-radius:8px;background:#fff}
+.intro-photo>img{object-position:var(--hero-position-desktop,center center)}
+.contact-box{border-top:3px solid var(--red);padding:30px}.contact-box .eyebrow{color:var(--red);margin-bottom:12px}
+.contact-actions{display:flex;flex-direction:column;align-items:flex-start;gap:12px;margin-top:22px}.contact-actions>a:not(.button){color:var(--navy);font-weight:650;border-bottom:1px solid #96a6b8}
+.sidebar .brand-copy{display:none}
+.login-page .brand-copy{display:flex}
+.settings-editor{max-width:1500px}.settings-grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(280px,.7fr);gap:24px;align-items:start}
+.settings-grid>div{display:grid;gap:20px}.settings-editor fieldset{margin:0}
+.settings-preview{position:sticky;top:24px;background:#132f49;color:#fff;border-radius:16px;padding:20px;box-shadow:0 10px 28px #102b451a;border:1px solid #ffffff25;overflow:hidden}
+.settings-preview .eyebrow{color:#c9d6e3;margin-bottom:14px}.preview-photo{aspect-ratio:1.45;border-radius:10px;background:#e7ecf2;overflow:hidden;display:grid;place-items:center;color:#506277;text-align:center;padding:18px;font-size:.85rem}
+.preview-photo img{width:100%;height:100%;object-fit:cover}.settings-preview h2{font-size:clamp(1.7rem,2.6vw,2.5rem);margin:22px 0 14px;line-height:1.08}.settings-preview h2 em{font-style:normal;color:#e8b3b7}.settings-preview>p:not(.eyebrow){color:#d8e1e9;line-height:1.65}
+.preview-button{display:inline-block;background:var(--red);padding:11px 15px;border-radius:8px;font-size:.85rem;font-weight:700;margin:8px 0 22px}.settings-preview>small{display:block;color:#b9c7d5}
+.success{padding:13px 16px;border:1px solid #a9c9b0;border-radius:10px;background:#edf7ef;color:#235b30;margin-top:18px}
+.settings-editor .image-editor>div{background:#fff}
+@media(max-width:1000px){.brand-copy{display:none}.settings-grid{grid-template-columns:1fr}.settings-preview{position:static}.editorial-hero .intro-copy:before{display:none}}
+@media(max-width:760px){.intro-photo>img{object-position:var(--hero-position-mobile,center center)}.hero-services{width:100%;row-gap:10px}.hero-services span{padding-inline:9px}.public-header .brand-logo{width:78px;height:58px}.settings-grid{display:block}.settings-preview{margin-top:20px}}
+
 /* Compact accents retain depth without glossy bevels. */
 :root{--navy:#153957;--navy-dark:#112b43;--red:#a71c29;--muted:#586575}
 .button,.hero-actions .button,.sidebar nav button,.public-header nav a,.admin-access,.segmented button,.view-toggle a{border-radius:10px}

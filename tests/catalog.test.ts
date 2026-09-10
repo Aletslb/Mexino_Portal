@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 import {generateKeyPair,exportJWK,SignJWT} from 'jose';
-import service,{validate,publicCatalog} from '../worker/index';
-import {blankProperty,blankDevelopment,blankLot} from '../src/model';
+import service,{validate,validateSettings,publicCatalog} from '../worker/index';
+import {blankProperty,blankDevelopment,blankLot,defaultPortalSettings} from '../src/model';
 import type {Env} from '../worker/types';
 
 const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-09-09',d1Databases:['DB'],r2Buckets:['BUCKET']}));
@@ -39,7 +39,7 @@ test('public projection excludes private commission and reporter fields',()=>{
   const p={...blankProperty(),title:'Casa',publication:'Publicado' as const};
   const d={...blankDevelopment(),title:'Desarrollo',publication:'Publicado' as const};
   const lot={...blankLot(d.id),reportedBy:'PERSONAL',note:'PRIVATE'};
-  const output=JSON.stringify(publicCatalog({properties:[p,{...p,id:crypto.randomUUID(),publication:'Borrador'}],developments:[d],lots:[lot]}));
+  const output=JSON.stringify(publicCatalog({properties:[p,{...p,id:crypto.randomUUID(),publication:'Borrador'}],developments:[d],lots:[lot],settings:defaultPortalSettings}));
   assert.ok(!output.includes('commission'));assert.ok(!output.includes('PERSONAL'));assert.ok(!output.includes('PRIVATE'));assert.ok(!output.includes('Borrador'));
 });
 test('validation rejects external assets, malformed polygons and invalid coordinates',()=>{
@@ -66,6 +66,14 @@ test('duplicate lot numbers are blocked; third-party sale needs no buyer; sold c
 test('advisor can edit inventory but cannot read administrative audit',async()=>{
   const advisor=await token('advisor@example.test');assert.equal((await request('/api/admin/properties','PUT',{...blankProperty(),title:'Asesor'},advisor)).status,200);
   assert.equal((await request('/api/admin/audit','GET',undefined,advisor)).status,403);
+  assert.equal((await request('/api/admin/settings','PUT',defaultPortalSettings,advisor)).status,403);
+});
+test('portal settings are validated, versioned and exposed publicly',async()=>{
+  assert.throws(()=>validateSettings({...defaultPortalSettings,primaryUrl:'javascript:alert(1)'}));
+  let r=await request('/api/admin/settings','PUT',{...defaultPortalSettings,heroTitle:'Tu próximo espacio'});assert.equal(r.status,200);
+  const saved=await r.json() as typeof defaultPortalSettings;assert.equal(saved.revision,1);
+  r=await request('/api/admin/settings','PUT',{...defaultPortalSettings,heroTitle:'Versión anterior'});assert.equal(r.status,409);
+  const publicData=await (await request('/api/catalog','GET',undefined,null)).json() as {settings:typeof defaultPortalSettings};assert.equal(publicData.settings.heroTitle,'Tu próximo espacio');
 });
 test('upload is private until linked to a published property and becomes private when hidden',async()=>{
   const png=new Uint8Array([137,80,78,71,13,10,26,10]);

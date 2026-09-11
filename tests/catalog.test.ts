@@ -4,12 +4,13 @@ import {readFile} from 'node:fs/promises';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 import {generateKeyPair,exportJWK,SignJWT} from 'jose';
 import service,{validate,validateSettings,publicCatalog} from '../worker/index';
-import {blankProperty,blankDevelopment,blankLot,defaultPortalSettings} from '../src/model';
+import {blankProperty,blankDevelopment,blankLot,defaultPortalSettings,saleBalance} from '../src/model';
+import type {BusinessData} from '../src/model';
 import type {Env} from '../worker/types';
 
 const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-09-09',d1Databases:['DB'],r2Buckets:['BUCKET']}));
 const db=await mf.getD1Database('DB'),bucket=await mf.getR2Bucket('BUCKET');
-for(const migration of ['0001_catalog.sql','0002_customers_sales.sql']){
+for(const migration of ['0001_catalog.sql','0002_customers_sales.sql','0003_payments.sql']){
   const sql=await readFile(new URL(`../migrations/${migration}`,import.meta.url),'utf8');
   for(const statement of sql.split(';').filter(s=>s.trim()))await db.prepare(statement).run();
 }
@@ -88,6 +89,22 @@ test('apartments reserve inventory and cancellation is admin-only with review',a
   response=await request(`/api/admin/sales/${sale.id}/review-cancellation`,'POST',{revision:saved.revision,notes:'Cliente solicita devolución'});assert.equal(response.status,200);
   response=await request(`/api/admin/sales/${sale.id}/cancel`,'POST',{revision:saved.revision+1,notes:'Acuerdo firmado entre cliente y propietario'});assert.equal(response.status,200);
   record=await db.prepare('SELECT data FROM records WHERE id=?').bind(lot.id).first();assert.equal(JSON.parse(String(record?.data)).status,'Disponible');
+});
+test('partial and extraordinary payments reduce oldest installments; only admin cancels payments',async()=>{
+  const d={...blankDevelopment(),title:'Fraccionamiento cobranza',collection:true};await request('/api/admin/developments','PUT',d);
+  const lot={...blankLot(d.id),block:'C',number:'3',price:100000};await request('/api/admin/lots','PUT',lot);
+  const customer={id:crypto.randomUUID(),revision:0,name:'Cliente cobranza',phone:'4881112233',address:'',notes:''};await request('/api/admin/customers','PUT',customer);
+  const sale={id:crypto.randomUUID(),revision:0,customerId:customer.id,assetType:'Lote' as const,assetId:lot.id,status:'Activa' as const,agreedPrice:100000,reservationAmount:0,downPayment:10000,monthlyPayment:30000,termMonths:3,paymentMethod:'Efectivo' as const,saleDate:'2026-09-11',nextPaymentDate:'2026-10-11',commissionType:'Porcentaje' as const,commissionValue:3,cancellationNotes:'',cancellationResolution:''};
+  assert.equal((await request('/api/admin/sales','PUT',sale)).status,200);
+  const advisor=await token('advisor@example.test'),partial={amount:15000,paymentDate:'2026-10-10',paymentMethod:'Efectivo',kind:'Mensualidad',reference:'R-1',notes:''};
+  let response=await request(`/api/admin/sales/${sale.id}/payments`,'POST',partial,advisor);assert.equal(response.status,201);const first=await response.json() as {id:string;revision:number};
+  let data=await (await request('/api/admin/business')).json() as BusinessData,summary=saleBalance(data.sales.find(x=>x.id===sale.id)!,data.payments,'2026-10-20');
+  assert.equal(summary.balance,75000);assert.equal(summary.installments[0].status,'Parcial');assert.equal(summary.installments[0].pending,15000);assert.equal(summary.overdue,15000);
+  response=await request(`/api/admin/sales/${sale.id}/payments`,'POST',{...partial,amount:75000,kind:'Abono extraordinario',reference:'R-2'});assert.equal(response.status,201);
+  data=await (await request('/api/admin/business')).json() as BusinessData;assert.equal(data.sales.find(x=>x.id===sale.id)?.status,'Liquidada');
+  assert.equal((await request(`/api/admin/payments/${first.id}/cancel`,'POST',{revision:first.revision,reason:'Captura duplicada'},advisor)).status,403);
+  assert.equal((await request(`/api/admin/payments/${first.id}/cancel`,'POST',{revision:first.revision,reason:'Captura duplicada'})).status,200);
+  data=await (await request('/api/admin/business')).json() as BusinessData;summary=saleBalance(data.sales.find(x=>x.id===sale.id)!,data.payments,'2026-10-20');assert.equal(data.sales.find(x=>x.id===sale.id)?.status,'Activa');assert.equal(summary.balance,15000);assert.equal(data.payments.find(x=>x.id===first.id)?.status,'Cancelado');
 });
 test('portal settings are validated, versioned and exposed publicly',async()=>{
   assert.throws(()=>validateSettings({...defaultPortalSettings,primaryUrl:'javascript:alert(1)'}));

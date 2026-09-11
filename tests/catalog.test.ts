@@ -9,8 +9,10 @@ import type {Env} from '../worker/types';
 
 const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-09-09',d1Databases:['DB'],r2Buckets:['BUCKET']}));
 const db=await mf.getD1Database('DB'),bucket=await mf.getR2Bucket('BUCKET');
-const sql=await readFile(new URL('../migrations/0001_catalog.sql',import.meta.url),'utf8');
-for(const statement of sql.split(';').filter(s=>s.trim()))await db.prepare(statement).run();
+for(const migration of ['0001_catalog.sql','0002_customers_sales.sql']){
+  const sql=await readFile(new URL(`../migrations/${migration}`,import.meta.url),'utf8');
+  for(const statement of sql.split(';').filter(s=>s.trim()))await db.prepare(statement).run();
+}
 const {privateKey,publicKey}=await generateKeyPair('RS256'),jwk=await exportJWK(publicKey);jwk.kid='test-key';
 const originalFetch=globalThis.fetch;
 globalThis.fetch=async(input,init)=>String(input)==='https://test.cloudflareaccess.com/cdn-cgi/access/certs'?Response.json({keys:[jwk]}):originalFetch(input,init);
@@ -67,6 +69,25 @@ test('advisor can edit inventory but cannot read administrative audit',async()=>
   const advisor=await token('advisor@example.test');assert.equal((await request('/api/admin/properties','PUT',{...blankProperty(),title:'Asesor'},advisor)).status,200);
   assert.equal((await request('/api/admin/audit','GET',undefined,advisor)).status,403);
   assert.equal((await request('/api/admin/settings','PUT',defaultPortalSettings,advisor)).status,403);
+});
+test('customers require name and phone; advisors can register them',async()=>{
+  const advisor=await token('advisor@example.test'),customer={id:crypto.randomUUID(),revision:0,name:'Cliente prueba',phone:'4881234567',address:'',notes:''};
+  assert.equal((await request('/api/admin/customers','PUT',{...customer,phone:''},advisor)).status,400);
+  assert.equal((await request('/api/admin/customers','PUT',customer,advisor)).status,200);
+});
+test('apartments reserve inventory and cancellation is admin-only with review',async()=>{
+  const d={...blankDevelopment(),title:'Fraccionamiento ventas'};await request('/api/admin/developments','PUT',d);
+  const lot={...blankLot(d.id),block:'B',number:'2',price:250000};await request('/api/admin/lots','PUT',lot);
+  const customer={id:crypto.randomUUID(),revision:0,name:'Comprador',phone:'4880000000',address:'',notes:''};await request('/api/admin/customers','PUT',customer);
+  const sale={id:crypto.randomUUID(),revision:0,customerId:customer.id,assetType:'Lote',assetId:lot.id,status:'Apartado',agreedPrice:240000,reservationAmount:10000,downPayment:0,monthlyPayment:5000,termMonths:46,paymentMethod:'Efectivo',saleDate:'2026-09-11',nextPaymentDate:'2026-10-11',commissionType:'Porcentaje',commissionValue:3,cancellationNotes:'',cancellationResolution:''};
+  let response=await request('/api/admin/sales','PUT',sale);assert.equal(response.status,200);let saved=await response.json() as typeof sale;
+  let record=await db.prepare('SELECT data FROM records WHERE id=?').bind(lot.id).first();assert.equal(JSON.parse(String(record?.data)).status,'Apartado');
+  response=await request('/api/admin/sales','PUT',{...saved,status:'Activa'});assert.equal(response.status,200);saved=await response.json() as typeof sale;
+  assert.equal((await request('/api/admin/sales','PUT',{...saved,status:'Apartado'})).status,400);
+  const advisor=await token('advisor@example.test');assert.equal((await request(`/api/admin/sales/${sale.id}/review-cancellation`,'POST',{revision:saved.revision,notes:'Cliente solicita cambio'},advisor)).status,403);
+  response=await request(`/api/admin/sales/${sale.id}/review-cancellation`,'POST',{revision:saved.revision,notes:'Cliente solicita devolución'});assert.equal(response.status,200);
+  response=await request(`/api/admin/sales/${sale.id}/cancel`,'POST',{revision:saved.revision+1,notes:'Acuerdo firmado entre cliente y propietario'});assert.equal(response.status,200);
+  record=await db.prepare('SELECT data FROM records WHERE id=?').bind(lot.id).first();assert.equal(JSON.parse(String(record?.data)).status,'Disponible');
 });
 test('portal settings are validated, versioned and exposed publicly',async()=>{
   assert.throws(()=>validateSettings({...defaultPortalSettings,primaryUrl:'javascript:alert(1)'}));

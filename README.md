@@ -33,6 +33,8 @@ Antes de publicar esta etapa, completar [la activación de D1, R2 y Access](docs
 - Catálogo con filtros, mapa de Matehuala y detalle de propiedad
 - Panel de propiedades, imágenes y fraccionamientos
 - Planos PDF/imagen con delimitación de lotes y disponibilidad
+- Expedientes de clientes, apartados y ventas con permisos por rol
+- Cancelaciones con revisión administrativa antes de liberar inventario
 - API con permisos, validación, revisiones concurrentes e historial
 
-El inventario inicia vacío. Los anuncios ficticios anteriores no se importan. La fotografía de portada es ilustrativa. La cobranza, ventas y caja corresponden a la siguiente etapa; los acuerdos completos están en [Alcance](docs/ALCANCE.md).
+El inventario inicia vacío. Los anuncios ficticios anteriores no se importan. La fotografía de portada es ilustrativa. La cobranza, recibos, entregas a propietarios y caja corresponden a la siguiente etapa; los acuerdos completos están en [Alcance](docs/ALCANCE.md).

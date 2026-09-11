@@ -1,7 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { Env } from './types';
 import { defaultPortalSettings } from '../src/model';
-import type { Catalog, Property, Development, Lot, PortalSettings } from '../src/model';
+import type { Catalog, Property, Development, Lot, PortalSettings, Customer, Sale, BusinessData } from '../src/model';
 
 const json = (data: unknown, status=200) => Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 class Failure extends Error { constructor(public status: number, message: string) {super(message);} }
@@ -23,6 +23,8 @@ export async function identity(request: Request, env: Env) {
 }
 type RecordKind='properties'|'developments'|'lots';
 type Row={id:string;kind:RecordKind;data:string;revision:number};
+type CustomerRow={id:string;name:string;phone:string;address:string;notes:string;revision:number;created_at:string;updated_at:string};
+type SaleRow={id:string;customer_id:string;asset_type:Sale['assetType'];asset_id:string;status:Sale['status'];agreed_price:number;reservation_amount:number;down_payment:number;monthly_payment:number;term_months:number;payment_method:Sale['paymentMethod'];sale_date:string;next_payment_date:string;commission_type:Sale['commissionType'];commission_value:number;cancellation_notes:string;cancellation_resolution:string;revision:number;created_at:string;updated_at:string};
 const settingsKey='portal/settings.json';
 async function portalSettings(env: Env): Promise<PortalSettings> {
   if(!env.BUCKET)return {...defaultPortalSettings};
@@ -35,6 +37,16 @@ async function catalog(env: Env): Promise<Catalog> {
   const result: Catalog={properties:[],developments:[],lots:[],settings};
   for(const row of results) (result[row.kind] as unknown[]).push({...JSON.parse(row.data),id:row.id,revision:row.revision});
   return result;
+}
+const customerDto=(x:CustomerRow):Customer=>({id:x.id,name:x.name,phone:x.phone,address:x.address,notes:x.notes,revision:x.revision,createdAt:x.created_at,updatedAt:x.updated_at});
+const saleDto=(x:SaleRow):Sale=>({id:x.id,customerId:x.customer_id,assetType:x.asset_type,assetId:x.asset_id,status:x.status,agreedPrice:x.agreed_price,reservationAmount:x.reservation_amount,downPayment:x.down_payment,monthlyPayment:x.monthly_payment,termMonths:x.term_months,paymentMethod:x.payment_method,saleDate:x.sale_date,nextPaymentDate:x.next_payment_date,commissionType:x.commission_type,commissionValue:x.commission_value,cancellationNotes:x.cancellation_notes,cancellationResolution:x.cancellation_resolution,revision:x.revision,createdAt:x.created_at,updatedAt:x.updated_at});
+async function business(env:Env):Promise<BusinessData>{
+  if(!env.DB)throw new Failure(503,'Clientes y ventas están pendientes de conexión.');
+  const [customers,sales]=await Promise.all([
+    env.DB.prepare('SELECT id,name,phone,address,notes,revision,created_at,updated_at FROM customers ORDER BY updated_at DESC').all<CustomerRow>(),
+    env.DB.prepare('SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales ORDER BY updated_at DESC').all<SaleRow>()
+  ]);
+  return {customers:customers.results.map(customerDto),sales:sales.results.map(saleDto)};
 }
 export function publicCatalog(data: Catalog) {
   const developments=data.developments.filter(x=>x.publication==='Publicado').map(({id,title,description,address,plan})=>({id,title,description,address,plan}));
@@ -71,6 +83,9 @@ export function validateSettings(v:Record<string,unknown>):PortalSettings {
   };
 }
 function commission(v:Record<string,unknown>) {const commissionType=choice(v.commissionType,['Porcentaje','Monto']);return {commissionType,commissionValue:number(v.commissionValue,commissionType==='Porcentaje'?100:1e10)};}
+function date(v:unknown,required=false){const value=text(v,10,required);if(value&&(!/^\d{4}-\d{2}-\d{2}$/.test(value)||Number.isNaN(Date.parse(`${value}T00:00:00Z`))))throw new Failure(400,'Revisa las fechas capturadas.');return value;}
+function identifier(v:unknown){const value=text(v,36,true);if(!/^[a-f0-9-]{36}$/.test(value))throw new Failure(400,'Identificador no válido.');return value;}
+async function body(request:Request){const raw=await request.text();if(raw.length>50000)throw new Failure(413,'Registro demasiado grande.');try{const value=JSON.parse(raw);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value as Record<string,unknown>;}catch{throw new Failure(400,'Datos no válidos.');}}
 export function validate(kind:string,v:Record<string,unknown>) {
   const base={id:text(v.id,36,true),revision:number(v.revision,1e9)};
   if(!/^[a-f0-9-]{36}$/.test(base.id)||!Number.isInteger(base.revision)) throw new Failure(400,'Identificador no válido.');
@@ -111,6 +126,51 @@ async function save(request:Request,env:Env,user:{email:string;role:string},kind
     if(result[0].meta.changes!==1)throw new Failure(409,'Registro actualizado por otra persona. Recarga antes de guardar.');
   }catch(e){if(e instanceof Failure)throw e; if(String(e).includes('UNIQUE'))throw new Failure(409,'Ya existe ese lote en esta manzana.');throw e;}
   return json({...value,revision:value.revision+1});
+}
+async function saveCustomer(request:Request,env:Env,user:{email:string;role:string}){
+  if(!env.DB)throw new Failure(503,'Clientes pendientes de conexión.');const v=await body(request);
+  const value={id:identifier(v.id),revision:number(v.revision,1e9),name:text(v.name,160,true),phone:text(v.phone,35,true),address:text(v.address,500),notes:text(v.notes,3000)};
+  if(!Number.isInteger(value.revision))throw new Failure(400,'Versión no válida.');
+  const old=await env.DB.prepare('SELECT revision FROM customers WHERE id=?').bind(value.id).first<{revision:number}>();
+  if((old&&old.revision!==value.revision)||(!old&&value.revision!==0))throw new Failure(409,'Otro usuario actualizó este cliente. Recarga antes de guardar.');
+  const mutation=old?env.DB.prepare('UPDATE customers SET name=?,phone=?,address=?,notes=?,revision=revision+1,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?').bind(value.name,value.phone,value.address,value.notes,user.email,value.id,value.revision):env.DB.prepare('INSERT INTO customers(id,name,phone,address,notes,created_by,updated_by) VALUES(?,?,?,?,?,?,?)').bind(value.id,value.name,value.phone,value.address,value.notes,user.email,user.email);
+  const result=await env.DB.batch([mutation,env.DB.prepare("INSERT INTO audit(id,record_id,actor,action,after_data) SELECT ?,?,?,?,? WHERE changes()=1").bind(crypto.randomUUID(),value.id,user.email,old?'Actualizar cliente':'Crear cliente',JSON.stringify(value))]);
+  if(result[0].meta.changes!==1)throw new Failure(409,'El cliente cambió mientras lo editabas.');return json({...value,revision:value.revision+1});
+}
+function inventoryData(row:{id:string;kind:RecordKind;data:string;revision:number},sale:Pick<Sale,'status'|'saleDate'>,email:string){
+  const current=JSON.parse(row.data) as Property|Lot;const status=sale.status==='Apartado'?'Apartado':'Vendido';
+  return {...current,status,...(row.kind==='lots'?{soldBy:status==='Vendido'?'Mexino':'',reportedBy:status==='Vendido'?email:'',reportedDate:status==='Vendido'?sale.saleDate:''}:{}),revision:row.revision+1};
+}
+async function saveSale(request:Request,env:Env,user:{email:string;role:string}){
+  if(!env.DB)throw new Failure(503,'Ventas pendientes de conexión.');const v=await body(request);
+  const commissionType=choice(v.commissionType,['Porcentaje','Monto']);
+  const value:Sale={id:identifier(v.id),revision:number(v.revision,1e9),customerId:identifier(v.customerId),assetType:choice(v.assetType,['Propiedad','Lote']),assetId:identifier(v.assetId),status:choice(v.status,['Apartado','Activa']),agreedPrice:number(v.agreedPrice),reservationAmount:number(v.reservationAmount),downPayment:number(v.downPayment),monthlyPayment:number(v.monthlyPayment),termMonths:number(v.termMonths,1200),paymentMethod:choice(v.paymentMethod,['Efectivo','Transferencia','Tarjeta','Otro']),saleDate:date(v.saleDate,true),nextPaymentDate:date(v.nextPaymentDate),commissionType,commissionValue:number(v.commissionValue,commissionType==='Porcentaje'?100:1e10),cancellationNotes:'',cancellationResolution:''};
+  if(!Number.isInteger(value.revision)||!Number.isInteger(value.termMonths))throw new Failure(400,'Revisa la versión y el plazo.');
+  if(value.status==='Apartado'&&(!value.reservationAmount||!value.nextPaymentDate))throw new Failure(400,'El apartado requiere cantidad y fecha del siguiente pago.');
+  if(value.agreedPrice<=0||value.reservationAmount+value.downPayment>value.agreedPrice)throw new Failure(400,'Revisa el precio pactado, apartado y enganche.');
+  if(!await env.DB.prepare('SELECT id FROM customers WHERE id=?').bind(value.customerId).first())throw new Failure(400,'Cliente no encontrado.');
+  const old=await env.DB.prepare('SELECT id,asset_type,asset_id,status,revision FROM sales WHERE id=?').bind(value.id).first<{id:string;asset_type:string;asset_id:string;status:string;revision:number}>();
+  if((old&&old.revision!==value.revision)||(!old&&value.revision!==0))throw new Failure(409,'Otra persona actualizó esta venta. Recarga antes de guardar.');
+  if(old&&old.status!=='Apartado'&&old.status!=='Activa')throw new Failure(400,'Esta operación ya no puede editarse desde el formulario.');
+  if(old?.status==='Activa'&&value.status!=='Activa')throw new Failure(400,'Una venta activa solo puede cancelarse mediante el flujo administrativo.');
+  if(old&&(old.asset_type!==value.assetType||old.asset_id!==value.assetId))throw new Failure(400,'El inmueble no puede cambiarse después de registrar la operación.');
+  const expectedKind=value.assetType==='Propiedad'?'properties':'lots';const asset=await env.DB.prepare('SELECT id,kind,data,revision FROM records WHERE id=? AND kind=?').bind(value.assetId,expectedKind).first<Row>();
+  if(!asset)throw new Failure(400,'Inmueble o lote no encontrado.');
+  if(!old&&!['Disponible','Apartado'].includes(String(JSON.parse(asset.data).status)))throw new Failure(409,'El inmueble seleccionado ya no está disponible.');
+  const inventory=inventoryData(asset,value,user.email),saleMutation=old?env.DB.prepare('UPDATE sales SET customer_id=?,status=?,agreed_price=?,reservation_amount=?,down_payment=?,monthly_payment=?,term_months=?,payment_method=?,sale_date=?,next_payment_date=?,commission_type=?,commission_value=?,revision=revision+1,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?').bind(value.customerId,value.status,value.agreedPrice,value.reservationAmount,value.downPayment,value.monthlyPayment,value.termMonths,value.paymentMethod,value.saleDate,value.nextPaymentDate,value.commissionType,value.commissionValue,user.email,value.id,value.revision):env.DB.prepare('INSERT INTO sales(id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,created_by,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(value.id,value.customerId,value.assetType,value.assetId,value.status,value.agreedPrice,value.reservationAmount,value.downPayment,value.monthlyPayment,value.termMonths,value.paymentMethod,value.saleDate,value.nextPaymentDate,value.commissionType,value.commissionValue,user.email,user.email);
+  try{const result=await env.DB.batch([saleMutation,env.DB.prepare('UPDATE records SET data=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?').bind(JSON.stringify(inventory),asset.id,asset.revision),env.DB.prepare("INSERT INTO audit(id,record_id,actor,action,after_data) SELECT ?,?,?,?,? WHERE changes()=1").bind(crypto.randomUUID(),value.id,user.email,old?'Actualizar venta':'Registrar venta',JSON.stringify(value))]);if(result[0].meta.changes!==1||result[1].meta.changes!==1)throw new Failure(409,'El registro cambió durante la operación. Recarga e intenta nuevamente.');}
+  catch(e){if(e instanceof Failure)throw e;if(String(e).includes('UNIQUE'))throw new Failure(409,'Este inmueble ya tiene una operación activa.');throw e;}
+  return json({...value,revision:value.revision+1});
+}
+async function cancelSale(request:Request,env:Env,user:{email:string;role:string},id:string,final:boolean){
+  if(user.role!=='Administrador')throw new Failure(403,'Solo administradores pueden gestionar cancelaciones.');if(!env.DB)throw new Failure(503,'Ventas pendientes de conexión.');const v=await body(request),revision=number(v.revision,1e9),notes=text(v.notes,3000,true);
+  const sale=await env.DB.prepare('SELECT id,asset_type,asset_id,status,revision FROM sales WHERE id=?').bind(id).first<{id:string;asset_type:Sale['assetType'];asset_id:string;status:Sale['status'];revision:number}>();
+  if(!sale||sale.revision!==revision)throw new Failure(409,'La venta cambió. Recarga antes de continuar.');
+  if(final&&sale.status!=='Cancelacion en revision')throw new Failure(400,'Primero registra la revisión de la cancelación.');
+  if(!final&&!['Apartado','Activa'].includes(sale.status))throw new Failure(400,'Esta venta no admite una nueva revisión.');
+  const next=final?'Cancelada':'Cancelacion en revision',queries=[env.DB.prepare(`UPDATE sales SET status=?,${final?'cancellation_resolution':'cancellation_notes'}=?,revision=revision+1,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?`).bind(next,notes,user.email,id,revision)];
+  if(final){const asset=await env.DB.prepare('SELECT id,kind,data,revision FROM records WHERE id=?').bind(sale.asset_id).first<Row>();if(!asset)throw new Failure(409,'No se encontró el inmueble relacionado.');const current=JSON.parse(asset.data) as Property|Lot,inventory={...current,status:'Disponible',...(asset.kind==='lots'?{soldBy:'',reportedBy:'',reportedDate:''}:{}),revision:asset.revision+1};queries.push(env.DB.prepare('UPDATE records SET data=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?').bind(JSON.stringify(inventory),asset.id,asset.revision));}
+  queries.push(env.DB.prepare("INSERT INTO audit(id,record_id,actor,action,after_data) SELECT ?,?,?,?,? WHERE changes()=1").bind(crypto.randomUUID(),id,user.email,final?'Cancelar venta':'Iniciar revisión de cancelación',notes));const result=await env.DB.batch(queries);if(result.some(x=>x.meta.changes!==1))throw new Failure(409,'La operación cambió durante la cancelación. Recarga e intenta nuevamente.');return json({ok:true,status:next,revision:revision+1});
 }
 async function saveSettings(request:Request,env:Env,user:{email:string;role:string}) {
   if(user.role!=='Administrador')throw new Failure(403,'Solo administradores pueden cambiar el portal.');
@@ -156,6 +216,7 @@ export default {
         if(request.method!=='GET'&&request.headers.get('Origin')!==url.origin)throw new Failure(403,'Origen no permitido.');
         if(path==='/api/admin/session'&&request.method==='GET')return json(user);
         if(path==='/api/admin/catalog'&&request.method==='GET')return json(await catalog(env));
+        if(path==='/api/admin/business'&&request.method==='GET')return json(await business(env));
         if(path==='/api/admin/audit'&&request.method==='GET') {
           if(user.role!=='Administrador')throw new Failure(403,'Solo administradores.');
           if(!env.DB)throw new Failure(503,'Historial pendiente de conexión.');
@@ -163,6 +224,9 @@ export default {
         }
         if(path==='/api/admin/uploads'&&request.method==='POST')return await upload(request,env,user.email);
         if(path==='/api/admin/settings'&&request.method==='PUT')return await saveSettings(request,env,user);
+        if(path==='/api/admin/customers'&&request.method==='PUT')return await saveCustomer(request,env,user);
+        if(path==='/api/admin/sales'&&request.method==='PUT')return await saveSale(request,env,user);
+        const cancellation=path.match(/^\/api\/admin\/sales\/([a-f0-9-]{36})\/(review-cancellation|cancel)$/);if(cancellation&&request.method==='POST')return await cancelSale(request,env,user,cancellation[1],cancellation[2]==='cancel');
         if(request.method==='PUT'&&/^\/api\/admin\/(properties|developments|lots)$/.test(path))return await save(request,env,user,path.split('/').pop()!);
         throw new Failure(404,'Acción no encontrada.');
       }

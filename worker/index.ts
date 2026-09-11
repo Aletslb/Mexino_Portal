@@ -1,7 +1,8 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { Env } from './types';
 import { defaultPortalSettings } from '../src/model';
-import type { Catalog, Property, Development, Lot, PortalSettings, Customer, Sale, BusinessData } from '../src/model';
+import { saleBalance } from '../src/model';
+import type { Catalog, Property, Development, Lot, PortalSettings, Customer, Sale, Payment, BusinessData } from '../src/model';
 
 const json = (data: unknown, status=200) => Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 class Failure extends Error { constructor(public status: number, message: string) {super(message);} }
@@ -25,6 +26,7 @@ type RecordKind='properties'|'developments'|'lots';
 type Row={id:string;kind:RecordKind;data:string;revision:number};
 type CustomerRow={id:string;name:string;phone:string;address:string;notes:string;revision:number;created_at:string;updated_at:string};
 type SaleRow={id:string;customer_id:string;asset_type:Sale['assetType'];asset_id:string;status:Sale['status'];agreed_price:number;reservation_amount:number;down_payment:number;monthly_payment:number;term_months:number;payment_method:Sale['paymentMethod'];sale_date:string;next_payment_date:string;commission_type:Sale['commissionType'];commission_value:number;cancellation_notes:string;cancellation_resolution:string;revision:number;created_at:string;updated_at:string};
+type PaymentRow={id:string;sale_id:string;amount:number;payment_date:string;payment_method:Payment['paymentMethod'];kind:Payment['kind'];reference:string;notes:string;status:Payment['status'];cancellation_reason:string;revision:number;created_by:string;cancelled_by:string;created_at:string;cancelled_at:string};
 const settingsKey='portal/settings.json';
 async function portalSettings(env: Env): Promise<PortalSettings> {
   if(!env.BUCKET)return {...defaultPortalSettings};
@@ -40,13 +42,15 @@ async function catalog(env: Env): Promise<Catalog> {
 }
 const customerDto=(x:CustomerRow):Customer=>({id:x.id,name:x.name,phone:x.phone,address:x.address,notes:x.notes,revision:x.revision,createdAt:x.created_at,updatedAt:x.updated_at});
 const saleDto=(x:SaleRow):Sale=>({id:x.id,customerId:x.customer_id,assetType:x.asset_type,assetId:x.asset_id,status:x.status,agreedPrice:x.agreed_price,reservationAmount:x.reservation_amount,downPayment:x.down_payment,monthlyPayment:x.monthly_payment,termMonths:x.term_months,paymentMethod:x.payment_method,saleDate:x.sale_date,nextPaymentDate:x.next_payment_date,commissionType:x.commission_type,commissionValue:x.commission_value,cancellationNotes:x.cancellation_notes,cancellationResolution:x.cancellation_resolution,revision:x.revision,createdAt:x.created_at,updatedAt:x.updated_at});
+const paymentDto=(x:PaymentRow):Payment=>({id:x.id,saleId:x.sale_id,amount:x.amount,paymentDate:x.payment_date,paymentMethod:x.payment_method,kind:x.kind,reference:x.reference,notes:x.notes,status:x.status,cancellationReason:x.cancellation_reason,revision:x.revision,createdBy:x.created_by,cancelledBy:x.cancelled_by,createdAt:x.created_at,cancelledAt:x.cancelled_at});
 async function business(env:Env):Promise<BusinessData>{
   if(!env.DB)throw new Failure(503,'Clientes y ventas están pendientes de conexión.');
-  const [customers,sales]=await Promise.all([
+  const [customers,sales,payments]=await Promise.all([
     env.DB.prepare('SELECT id,name,phone,address,notes,revision,created_at,updated_at FROM customers ORDER BY updated_at DESC').all<CustomerRow>(),
-    env.DB.prepare('SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales ORDER BY updated_at DESC').all<SaleRow>()
+    env.DB.prepare('SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales ORDER BY updated_at DESC').all<SaleRow>(),
+    env.DB.prepare('SELECT id,sale_id,amount,payment_date,payment_method,kind,reference,notes,status,cancellation_reason,revision,created_by,cancelled_by,created_at,cancelled_at FROM payments ORDER BY payment_date DESC,created_at DESC').all<PaymentRow>()
   ]);
-  return {customers:customers.results.map(customerDto),sales:sales.results.map(saleDto)};
+  return {customers:customers.results.map(customerDto),sales:sales.results.map(saleDto),payments:payments.results.map(paymentDto)};
 }
 export function publicCatalog(data: Catalog) {
   const developments=data.developments.filter(x=>x.publication==='Publicado').map(({id,title,description,address,plan})=>({id,title,description,address,plan}));
@@ -162,6 +166,33 @@ async function saveSale(request:Request,env:Env,user:{email:string;role:string})
   catch(e){if(e instanceof Failure)throw e;if(String(e).includes('UNIQUE'))throw new Failure(409,'Este inmueble ya tiene una operación activa.');throw e;}
   return json({...value,revision:value.revision+1});
 }
+async function registerPayment(request:Request,env:Env,user:{email:string;role:string},saleId:string){
+  if(!env.DB)throw new Failure(503,'Cobranza pendiente de conexión.');const v=await body(request);
+  const saleRow=await env.DB.prepare('SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales WHERE id=?').bind(saleId).first<SaleRow>();
+  if(!saleRow)throw new Failure(404,'Venta no encontrada.');if(!['Apartado','Activa'].includes(saleRow.status))throw new Failure(400,'Esta operación no admite nuevos pagos.');
+  const sale=saleDto(saleRow),paymentRows=await env.DB.prepare("SELECT id,sale_id,amount,payment_date,payment_method,kind,reference,notes,status,cancellation_reason,revision,created_by,cancelled_by,created_at,cancelled_at FROM payments WHERE sale_id=? AND status='Aplicado' ORDER BY payment_date,created_at").bind(saleId).all<PaymentRow>(),summary=saleBalance(sale,paymentRows.results.map(paymentDto));
+  const amount=Math.round(number(v.amount)*100)/100;if(amount<=0||amount>summary.balance+.001)throw new Failure(400,`El pago debe ser mayor a cero y no superar el saldo de ${summary.balance.toFixed(2)}.`);
+  const payment:Payment={id:crypto.randomUUID(),saleId,amount,paymentDate:date(v.paymentDate,true),paymentMethod:choice(v.paymentMethod,['Efectivo','Transferencia','Tarjeta','Otro']),kind:choice(v.kind,['Mensualidad','Abono extraordinario']),reference:text(v.reference,120),notes:text(v.notes,1000),status:'Aplicado',cancellationReason:'',revision:1,createdBy:user.email,cancelledBy:'',createdAt:new Date().toISOString(),cancelledAt:''};
+  const liquidated=amount>=summary.balance-.001,nextStatus=liquidated?'Liquidada':sale.status;
+  const result=await env.DB.batch([
+    env.DB.prepare('INSERT INTO payments(id,sale_id,amount,payment_date,payment_method,kind,reference,notes,status,sale_status_before,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(payment.id,saleId,payment.amount,payment.paymentDate,payment.paymentMethod,payment.kind,payment.reference,payment.notes,payment.status,sale.status,user.email),
+    env.DB.prepare('UPDATE sales SET status=?,revision=revision+1,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?').bind(nextStatus,user.email,saleId,sale.revision),
+    env.DB.prepare('INSERT INTO audit(id,record_id,actor,action,after_data) VALUES(?,?,?,?,?)').bind(crypto.randomUUID(),saleId,user.email,liquidated?'Registrar pago y liquidar venta':'Registrar pago',JSON.stringify(payment))
+  ]);
+  if(result[0].meta.changes!==1||result[1].meta.changes!==1)throw new Failure(409,'La venta cambió durante el pago. Recarga antes de intentarlo nuevamente.');return json({...payment,saleStatus:nextStatus},201);
+}
+async function cancelPayment(request:Request,env:Env,user:{email:string;role:string},paymentId:string){
+  if(user.role!=='Administrador')throw new Failure(403,'Solo administradores pueden cancelar pagos.');if(!env.DB)throw new Failure(503,'Cobranza pendiente de conexión.');const v=await body(request),revision=number(v.revision,1e9),reason=text(v.reason,1000,true);
+  const payment=await env.DB.prepare('SELECT id,sale_id,status,revision,sale_status_before FROM payments WHERE id=?').bind(paymentId).first<{id:string;sale_id:string;status:Payment['status'];revision:number;sale_status_before:Sale['status']}>();
+  if(!payment)throw new Failure(404,'Pago no encontrado.');if(payment.status!=='Aplicado')throw new Failure(400,'Este pago ya fue cancelado.');if(payment.revision!==revision)throw new Failure(409,'El pago cambió. Recarga antes de continuar.');
+  const sale=await env.DB.prepare('SELECT status,revision FROM sales WHERE id=?').bind(payment.sale_id).first<{status:Sale['status'];revision:number}>();if(!sale)throw new Failure(409,'No se encontró la venta relacionada.');
+  const nextStatus=sale.status==='Liquidada'?payment.sale_status_before:sale.status,result=await env.DB.batch([
+    env.DB.prepare("UPDATE payments SET status='Cancelado',cancellation_reason=?,cancelled_by=?,cancelled_at=CURRENT_TIMESTAMP,revision=revision+1 WHERE id=? AND revision=? AND status='Aplicado'").bind(reason,user.email,paymentId,revision),
+    env.DB.prepare('UPDATE sales SET status=?,revision=revision+1,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?').bind(nextStatus,user.email,payment.sale_id,sale.revision),
+    env.DB.prepare('INSERT INTO audit(id,record_id,actor,action,after_data) VALUES(?,?,?,?,?)').bind(crypto.randomUUID(),payment.sale_id,user.email,'Cancelar pago',JSON.stringify({paymentId,reason}))
+  ]);
+  if(result[0].meta.changes!==1||result[1].meta.changes!==1)throw new Failure(409,'La cobranza cambió durante la cancelación. Recarga antes de continuar.');return json({ok:true,status:'Cancelado',revision:revision+1,saleStatus:nextStatus});
+}
 async function cancelSale(request:Request,env:Env,user:{email:string;role:string},id:string,final:boolean){
   if(user.role!=='Administrador')throw new Failure(403,'Solo administradores pueden gestionar cancelaciones.');if(!env.DB)throw new Failure(503,'Ventas pendientes de conexión.');const v=await body(request),revision=number(v.revision,1e9),notes=text(v.notes,3000,true);
   const sale=await env.DB.prepare('SELECT id,asset_type,asset_id,status,revision FROM sales WHERE id=?').bind(id).first<{id:string;asset_type:Sale['assetType'];asset_id:string;status:Sale['status'];revision:number}>();
@@ -226,6 +257,8 @@ export default {
         if(path==='/api/admin/settings'&&request.method==='PUT')return await saveSettings(request,env,user);
         if(path==='/api/admin/customers'&&request.method==='PUT')return await saveCustomer(request,env,user);
         if(path==='/api/admin/sales'&&request.method==='PUT')return await saveSale(request,env,user);
+        const paymentRegistration=path.match(/^\/api\/admin\/sales\/([a-f0-9-]{36})\/payments$/);if(paymentRegistration&&request.method==='POST')return await registerPayment(request,env,user,paymentRegistration[1]);
+        const paymentCancellation=path.match(/^\/api\/admin\/payments\/([a-f0-9-]{36})\/cancel$/);if(paymentCancellation&&request.method==='POST')return await cancelPayment(request,env,user,paymentCancellation[1]);
         const cancellation=path.match(/^\/api\/admin\/sales\/([a-f0-9-]{36})\/(review-cancellation|cancel)$/);if(cancellation&&request.method==='POST')return await cancelSale(request,env,user,cancellation[1],cancellation[2]==='cancel');
         if(request.method==='PUT'&&/^\/api\/admin\/(properties|developments|lots)$/.test(path))return await save(request,env,user,path.split('/').pop()!);
         throw new Failure(404,'Acción no encontrada.');

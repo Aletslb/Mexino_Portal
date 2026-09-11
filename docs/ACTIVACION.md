@@ -50,7 +50,7 @@ Para desarrollo local completo, compilar y utilizar `wrangler dev` con bindings 
 - No se importan los anuncios, precios o ubicaciones ficticios de la versión inicial como inventario real.
 - Datos reales de contacto aún no proporcionados. El portal no inventa un teléfono ni presenta un formulario que no entregue mensajes.
 - Los mapas usan Leaflet y teselas estándar OpenStreetMap con atribución, sin precarga ni descarga masiva. Revisar proveedor/capacidad antes de un incremento significativo de tráfico.
-- Ya existen expedientes de clientes, apartados, ventas y cancelación administrativa. La cobranza, recibos, entrega a propietarios y caja siguen pendientes.
+- Ya existen expedientes de clientes, apartados, ventas, cobranza y cancelación administrativa. Los recibos imprimibles, entrega a propietarios y caja siguen pendientes.
 - Publicar un plano implica publicar la imagen completa: usar planos sin información personal impresa.
 - No se han aplicado migraciones ni activado autenticación en la cuenta de Cloudflare desde esta sesión.
 

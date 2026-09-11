@@ -15,7 +15,15 @@ export type Sale = {
   commissionType:'Porcentaje'|'Monto'; commissionValue:number; cancellationNotes:string; cancellationResolution:string;
   createdAt?:string; updatedAt?:string;
 };
-export type BusinessData={customers:Customer[];sales:Sale[]};
+export type Payment = {
+  id:string; saleId:string; amount:number; paymentDate:string; paymentMethod:Sale['paymentMethod'];
+  kind:'Mensualidad'|'Abono extraordinario'; reference:string; notes:string;
+  status:'Aplicado'|'Cancelado'; cancellationReason:string; revision:number;
+  createdBy:string; cancelledBy:string; createdAt:string; cancelledAt:string;
+};
+export type Installment = {number:number;dueDate:string;amount:number;paid:number;pending:number;status:'Pagada'|'Parcial'|'Vencida'|'Pendiente'};
+export type SaleBalance = {initialPaid:number;paymentsPaid:number;principalAdvance:number;totalPaid:number;balance:number;overdue:number;nextDueDate:string;installments:Installment[]};
+export type BusinessData={customers:Customer[];sales:Sale[];payments:Payment[]};
 export type PortalSettings = {
   revision: number;
   heroMode: 'Imagen fija' | 'Carrusel';
@@ -60,3 +68,22 @@ export function blankDevelopment(): Development {return {id:crypto.randomUUID(),
 export function blankLot(developmentId: string): Lot {return {id:crypto.randomUUID(),revision:0,developmentId,block:'',number:'',area:0,price:0,status:'Disponible',polygon:[],soldBy:'',reportedBy:'',reportedDate:'',note:''};}
 export function blankCustomer():Customer{return {id:crypto.randomUUID(),revision:0,name:'',phone:'',address:'',notes:''};}
 export function blankSale():Sale{return {id:crypto.randomUUID(),revision:0,customerId:'',assetType:'Lote',assetId:'',status:'Apartado',agreedPrice:0,reservationAmount:0,downPayment:0,monthlyPayment:0,termMonths:0,paymentMethod:'Efectivo',saleDate:new Date().toISOString().slice(0,10),nextPaymentDate:'',commissionType:'Porcentaje',commissionValue:3,cancellationNotes:'',cancellationResolution:''};}
+const cents=(value:number)=>Math.round(value*100)/100;
+function addMonths(date:string,months:number){const [year,month,day]=date.split('-').map(Number),target=new Date(Date.UTC(year,month-1+months,1)),last=new Date(Date.UTC(target.getUTCFullYear(),target.getUTCMonth()+1,0)).getUTCDate();return `${target.getUTCFullYear()}-${String(target.getUTCMonth()+1).padStart(2,'0')}-${String(Math.min(day,last)).padStart(2,'0')}`;}
+export function saleBalance(sale:Sale,payments:Payment[],today=new Date().toISOString().slice(0,10)):SaleBalance{
+  const initialPaid=cents(Math.min(sale.agreedPrice,sale.reservationAmount+sale.downPayment));
+  const applied=payments.filter(p=>p.saleId===sale.id&&p.status==='Aplicado').sort((a,b)=>a.paymentDate.localeCompare(b.paymentDate)||a.createdAt.localeCompare(b.createdAt));
+  const paymentsPaid=cents(applied.reduce((sum,p)=>sum+p.amount,0));
+  const totalPaid=cents(Math.min(sale.agreedPrice,initialPaid+paymentsPaid)),balance=cents(Math.max(0,sale.agreedPrice-totalPaid));
+  const financed=cents(Math.max(0,sale.agreedPrice-initialPaid)),installments:Installment[]=[];
+  if(sale.monthlyPayment>0&&sale.nextPaymentDate&&financed>0){
+    let planned=financed,index=0,advance=0;
+    while(planned>.001&&index<1200){const amount=cents(Math.min(sale.monthlyPayment,planned));installments.push({number:index+1,dueDate:addMonths(sale.nextPaymentDate,index),amount,paid:0,pending:amount,status:'Pendiente'});planned=cents(planned-amount);index++;}
+    for(const payment of applied){let available=payment.amount;const due=installments.filter(x=>x.pending>.001&&x.dueDate<=payment.paymentDate);for(const item of due){const amount=cents(Math.min(item.pending,available));item.paid=cents(item.paid+amount);item.pending=cents(item.pending-amount);available=cents(available-amount);if(available<=.001)break;}if(available>.001&&!due.length){const next=installments.find(x=>x.pending>.001);if(next){const amount=cents(Math.min(next.pending,available));next.paid=cents(next.paid+amount);next.pending=cents(next.pending-amount);available=cents(available-amount);}}advance=cents(advance+available);}
+    for(let i=installments.length-1;i>=0&&advance>.001;i--){const item=installments[i];if(item.paid>0)continue;const reduction=cents(Math.min(item.amount,advance));item.amount=cents(item.amount-reduction);item.pending=cents(item.pending-reduction);advance=cents(advance-reduction);if(item.amount<=.001)installments.splice(i,1);}
+    installments.forEach((item,i)=>{item.number=i+1;item.status=item.pending<=.001?'Pagada':item.paid>0?'Parcial':item.dueDate<=today?'Vencida':'Pendiente';});
+  }
+  const scheduledPaid=cents(installments.reduce((sum,x)=>sum+x.paid,0)),principalAdvance=cents(Math.max(0,paymentsPaid-scheduledPaid));
+  const overdue=cents(installments.filter(x=>x.dueDate<=today).reduce((sum,x)=>sum+x.pending,0)),nextDueDate=installments.find(x=>x.pending>.001)?.dueDate||'';
+  return {initialPaid,paymentsPaid,principalAdvance,totalPaid,balance,overdue,nextDueDate,installments};
+}

@@ -45,13 +45,12 @@ No hay registro público ni asignación de roles desde el navegador. Administrad
 
 Para desarrollo local completo, compilar y utilizar `wrangler dev` con bindings locales y `.dev.vars` ignorado. El servidor Vite por sí solo no ejecuta la API. Las pruebas automatizadas usan D1/R2 locales sin acceder a la cuenta de producción.
 
-## Límites de esta entrega
+## Límites actuales
 
 - No se importan los anuncios, precios o ubicaciones ficticios de la versión inicial como inventario real.
 - Datos reales de contacto aún no proporcionados. El portal no inventa un teléfono ni presenta un formulario que no entregue mensajes.
 - Los mapas usan Leaflet y teselas estándar OpenStreetMap con atribución, sin precarga ni descarga masiva. Revisar proveedor/capacidad antes de un incremento significativo de tráfico.
-- No hay todavía expediente de venta, cobranza, cancelación de ventas, entrega a propietarios ni caja. Marcar vendido actualiza únicamente disponibilidad. Volver de vendido a disponible está bloqueado hasta disponer del flujo de cancelación.
-- Apartados se reservan en el modelo, pero no se ofrecen todavía como operación.
+- Ya existen expedientes de clientes, apartados, ventas y cancelación administrativa. La cobranza, recibos, entrega a propietarios y caja siguen pendientes.
 - Publicar un plano implica publicar la imagen completa: usar planos sin información personal impresa.
 - No se han aplicado migraciones ni activado autenticación en la cuenta de Cloudflare desde esta sesión.
 

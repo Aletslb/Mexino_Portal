@@ -217,6 +217,11 @@ export type PortalSettings = {
   whatsapp: string;
   email: string;
   address: string;
+  aboutTitle: string;
+  aboutStory: string;
+  aboutExperience: string;
+  aboutMission: string;
+  officeHours: string;
 };
 export const defaultPortalSettings: PortalSettings = {
   revision: 0,
@@ -236,6 +241,14 @@ export const defaultPortalSettings: PortalSettings = {
   whatsapp: "",
   email: "",
   address: "Matehuala, San Luis Potosí",
+  aboutTitle: "Experiencia local para decisiones importantes.",
+  aboutStory:
+    "En Casa Mexino acompañamos a personas, familias e inversionistas a encontrar, vender y administrar espacios con atención cercana y procesos claros.",
+  aboutExperience:
+    "Conocemos el mercado inmobiliario de Matehuala y el Altiplano Potosino.",
+  aboutMission:
+    "Construir relaciones de confianza y hacer que cada operación sea comprensible, segura y bien acompañada.",
+  officeHours: "Atención con cita previa",
 };
 export type Catalog = {
   properties: Property[];

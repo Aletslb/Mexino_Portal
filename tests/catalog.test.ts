@@ -81,6 +81,7 @@ test('apartments reserve inventory and cancellation is admin-only with review',a
   const lot={...blankLot(d.id),block:'B',number:'2',price:250000};await request('/api/admin/lots','PUT',lot);
   const customer={id:crypto.randomUUID(),revision:0,name:'Comprador',phone:'4880000000',address:'',notes:''};await request('/api/admin/customers','PUT',customer);
   const sale={id:crypto.randomUUID(),revision:0,customerId:customer.id,assetType:'Lote',assetId:lot.id,status:'Apartado',agreedPrice:240000,reservationAmount:10000,downPayment:0,monthlyPayment:5000,termMonths:46,paymentMethod:'Efectivo',saleDate:'2026-09-11',nextPaymentDate:'2026-10-11',commissionType:'Porcentaje',commissionValue:3,cancellationNotes:'',cancellationResolution:''};
+  assert.equal((await request('/api/admin/sales','PUT',{...sale,termMonths:12})).status,400);
   let response=await request('/api/admin/sales','PUT',sale);assert.equal(response.status,200);let saved=await response.json() as typeof sale;
   let record=await db.prepare('SELECT data FROM records WHERE id=?').bind(lot.id).first();assert.equal(JSON.parse(String(record?.data)).status,'Apartado');
   response=await request('/api/admin/sales','PUT',{...saved,status:'Activa'});assert.equal(response.status,200);saved=await response.json() as typeof sale;

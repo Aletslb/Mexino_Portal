@@ -578,10 +578,61 @@ type ReceiptRecord = {
   reference: string;
   status: "Aplicado" | "Cancelado";
   currentBalance: number;
+  applications: string[];
   issuedBy?: string;
 };
 const receiptFolio = (id: string, date: string, prefix = "") =>
   `CM-${date.slice(0, 4)}-${prefix}${id.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+
+function paymentApplication(
+  sale: Sale,
+  payments: Payment[],
+  target: Payment,
+): { applications: string[]; currentBalance: number } {
+  if (target.status === "Cancelado")
+    return {
+      applications: ["Movimiento cancelado; sin aplicación vigente"],
+      currentBalance: saleBalance(sale, payments).balance,
+    };
+  const ordered = payments
+    .filter(
+      (payment) => payment.saleId === sale.id && payment.status === "Aplicado",
+    )
+    .sort(
+      (a, b) =>
+        a.paymentDate.localeCompare(b.paymentDate) ||
+        a.createdAt.localeCompare(b.createdAt),
+    );
+  const index = ordered.findIndex((payment) => payment.id === target.id);
+  if (index < 0)
+    return {
+      applications: [target.kind],
+      currentBalance: saleBalance(sale, payments).balance,
+    };
+  const before = saleBalance(sale, ordered.slice(0, index), target.paymentDate),
+    after = saleBalance(sale, ordered.slice(0, index + 1), target.paymentDate),
+    beforePaid = new Map(
+      before.installments.map((item) => [item.dueDate, item.paid]),
+    );
+  const applications = after.installments
+    .map((item) => ({
+      number: item.number,
+      amount: Math.max(0, item.paid - (beforePaid.get(item.dueDate) || 0)),
+    }))
+    .filter((item) => item.amount > 0.001)
+    .map((item) => `Mensualidad ${item.number}: ${money(item.amount)}`);
+  const allocated = after.installments.reduce(
+    (total, item) =>
+      total + Math.max(0, item.paid - (beforePaid.get(item.dueDate) || 0)),
+    0,
+  );
+  const capital = Math.max(0, target.amount - allocated);
+  if (capital > 0.001) applications.push(`Abono a capital: ${money(capital)}`);
+  return {
+    applications: applications.length ? applications : [target.kind],
+    currentBalance: after.balance,
+  };
+}
 
 function PrintableReceipt({
   sale,
@@ -655,6 +706,12 @@ function PrintableReceipt({
             <small>Saldo actual: {money(record.currentBalance)}</small>
           </div>
         </section>
+        <section className="receipt-application">
+          <span>Aplicación del pago</span>
+          {record.applications.map((application) => (
+            <strong key={application}>{application}</strong>
+          ))}
+        </section>
         <div className="receipt-total">
           <span>Cantidad recibida</span>
           <strong>{money(record.amount)}</strong>
@@ -717,6 +774,12 @@ function ReceiptsAndDeliveries({
     reference: "",
     status: sale.status === "Cancelada" ? "Cancelado" : "Aplicado",
     currentBalance: summary.balance,
+    applications: [
+      ...(sale.reservationAmount > 0
+        ? [`Apartado: ${money(sale.reservationAmount)}`]
+        : []),
+      ...(sale.downPayment > 0 ? [`Enganche: ${money(sale.downPayment)}`] : []),
+    ],
   };
   async function registerDelivery(e: FormEvent) {
     e.preventDefault();
@@ -826,6 +889,7 @@ function ReceiptsAndDeliveries({
                 </tr>
               )}
               {salePayments.map((payment) => {
+                const application = paymentApplication(sale, payments, payment);
                 const record: ReceiptRecord = {
                   folio: receiptFolio(payment.id, payment.paymentDate),
                   date: payment.paymentDate,
@@ -834,7 +898,8 @@ function ReceiptsAndDeliveries({
                   method: payment.paymentMethod,
                   reference: payment.reference,
                   status: payment.status,
-                  currentBalance: summary.balance,
+                  currentBalance: application.currentBalance,
+                  applications: application.applications,
                   issuedBy: payment.createdBy,
                 };
                 return (

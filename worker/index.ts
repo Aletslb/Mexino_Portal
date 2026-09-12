@@ -2044,7 +2044,10 @@ export default {
           throw new Failure(403, "Origen no permitido.");
         if (path === "/api/admin/session" && request.method === "GET")
           return json(user);
-        if (path === "/api/admin/login" && request.method === "GET")
+        if (
+          ["/api/admin/login", "/api/admin/me"].includes(path) &&
+          request.method === "GET"
+        )
           return Response.redirect(`${url.origin}/admin/`, 302);
         if (path === "/api/admin/catalog" && request.method === "GET")
           return json(await catalog(env));

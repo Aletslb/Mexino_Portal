@@ -1514,7 +1514,7 @@ export default function Admin() {
           <p className="notice" role="status">
             {authError}
           </p>
-          <a className="button" href="/api/admin/login">
+          <a className="button" href="/api/admin/me">
             Iniciar sesión
           </a>
           <a className="back" href="/">

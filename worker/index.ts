@@ -2048,7 +2048,7 @@ export default {
           ["/api/admin/login", "/api/admin/me"].includes(path) &&
           request.method === "GET"
         )
-          return Response.redirect(`${url.origin}/admin/`, 302);
+          return Response.redirect(`${url.origin}/admin/?access=1`, 302);
         if (path === "/api/admin/catalog" && request.method === "GET")
           return json(await catalog(env));
         if (path === "/api/admin/business" && request.method === "GET")

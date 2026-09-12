@@ -14,6 +14,9 @@ import type {
   OwnerDelivery,
   Receipt,
   BusinessData,
+  CashMovement,
+  CashClosing,
+  CashData,
 } from "../src/model";
 
 const json = (data: unknown, status = 200) =>
@@ -162,6 +165,37 @@ type ReceiptRow = {
   issued_date: string;
   created_at: string;
 };
+type CashMovementRow = {
+  id: string;
+  movement_type: CashMovement["movementType"];
+  category: CashMovement["category"];
+  amount: number;
+  movement_date: string;
+  payment_method: CashMovement["paymentMethod"];
+  beneficiary: string;
+  reference: string;
+  notes: string;
+  source_type: CashMovement["sourceType"];
+  source_id: string;
+  status: CashMovement["status"];
+  cancellation_reason: string;
+  revision: number;
+  created_by: string;
+  cancelled_by: string;
+  created_at: string;
+  cancelled_at: string;
+};
+type CashClosingRow = {
+  id: string;
+  closing_date: string;
+  payment_method: CashClosing["paymentMethod"];
+  expected_amount: number;
+  counted_amount: number;
+  difference: number;
+  notes: string;
+  created_by: string;
+  created_at: string;
+};
 const settingsKey = "portal/settings.json";
 async function portalSettings(env: Env): Promise<PortalSettings> {
   if (!env.BUCKET) return { ...defaultPortalSettings };
@@ -276,6 +310,37 @@ const receiptDto = (x: ReceiptRow): Receipt => ({
   sequenceYear: x.sequence_year,
   sequenceNumber: x.sequence_number,
   issuedDate: x.issued_date,
+  createdAt: x.created_at,
+});
+const cashMovementDto = (x: CashMovementRow): CashMovement => ({
+  id: x.id,
+  movementType: x.movement_type,
+  category: x.category,
+  amount: x.amount,
+  movementDate: x.movement_date,
+  paymentMethod: x.payment_method,
+  beneficiary: x.beneficiary,
+  reference: x.reference,
+  notes: x.notes,
+  sourceType: x.source_type,
+  sourceId: x.source_id,
+  status: x.status,
+  cancellationReason: x.cancellation_reason,
+  revision: x.revision,
+  createdBy: x.created_by,
+  cancelledBy: x.cancelled_by,
+  createdAt: x.created_at,
+  cancelledAt: x.cancelled_at,
+});
+const cashClosingDto = (x: CashClosingRow): CashClosing => ({
+  id: x.id,
+  closingDate: x.closing_date,
+  paymentMethod: x.payment_method,
+  expectedAmount: x.expected_amount,
+  countedAmount: x.counted_amount,
+  difference: x.difference,
+  notes: x.notes,
+  createdBy: x.created_by,
   createdAt: x.created_at,
 });
 async function business(
@@ -528,6 +593,44 @@ async function nextReceipt(
         receipt.issuedDate,
       ),
   };
+}
+function cashMovementStatement(
+  db: D1Database,
+  input: {
+    id?: string;
+    movementType: CashMovement["movementType"];
+    category: CashMovement["category"];
+    amount: number;
+    movementDate: string;
+    paymentMethod: Sale["paymentMethod"];
+    beneficiary?: string;
+    reference?: string;
+    notes?: string;
+    sourceType: CashMovement["sourceType"];
+    sourceId: string;
+    status?: CashMovement["status"];
+    createdBy: string;
+  },
+) {
+  return db
+    .prepare(
+      "INSERT INTO cash_movements(id,movement_type,category,amount,movement_date,payment_method,beneficiary,reference,notes,source_type,source_id,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      input.id || crypto.randomUUID(),
+      input.movementType,
+      input.category,
+      input.amount,
+      input.movementDate,
+      input.paymentMethod,
+      input.beneficiary || "",
+      input.reference || "",
+      input.notes || "",
+      input.sourceType,
+      input.sourceId,
+      input.status || "Aplicado",
+      input.createdBy,
+    );
 }
 async function body(request: Request) {
   const raw = await request.text();
@@ -1430,34 +1533,251 @@ async function cancelSale(
     );
   return json({ ok: true, status: next, revision: revision + 1 });
 }
+async function cashData(env: Env, user: { role: string }): Promise<CashData> {
+  if (user.role !== "Administrador")
+    throw new Failure(403, "Solo administradores pueden consultar caja.");
+  if (!env.DB) throw new Failure(503, "Caja pendiente de conexión.");
+  const [movements, closings] = await Promise.all([
+    env.DB.prepare(
+      "SELECT id,movement_type,category,amount,movement_date,payment_method,beneficiary,reference,notes,source_type,source_id,status,cancellation_reason,revision,created_by,cancelled_by,created_at,cancelled_at FROM cash_movements ORDER BY movement_date DESC,created_at DESC",
+    ).all<CashMovementRow>(),
+    env.DB.prepare(
+      "SELECT id,closing_date,payment_method,expected_amount,counted_amount,difference,notes,created_by,created_at FROM cash_closings ORDER BY closing_date DESC,created_at DESC",
+    ).all<CashClosingRow>(),
+  ]);
+  return {
+    movements: movements.results.map(cashMovementDto),
+    closings: closings.results.map(cashClosingDto),
+  };
+}
+async function registerCashMovement(
+  request: Request,
+  env: Env,
+  user: { email: string; role: string },
+) {
+  if (user.role !== "Administrador")
+    throw new Failure(
+      403,
+      "Solo administradores pueden registrar movimientos de caja.",
+    );
+  if (!env.DB) throw new Failure(503, "Caja pendiente de conexión.");
+  const v = await body(request),
+    movementType = choice(v.movementType, ["Ingreso", "Gasto"]),
+    allowed =
+      movementType === "Ingreso"
+        ? ["Comisión", "Otro"]
+        : ["Nómina", "Honorarios", "Gasto operativo", "Otro"],
+    category = choice(v.category, allowed) as CashMovement["category"],
+    amount = Math.round(number(v.amount) * 100) / 100,
+    beneficiary = text(v.beneficiary, 160),
+    movementDate = date(v.movementDate, true);
+  if (amount <= 0) throw new Failure(400, "La cantidad debe ser mayor a cero.");
+  if (["Nómina", "Honorarios"].includes(category) && !beneficiary)
+    throw new Failure(400, "Indica a quién se realizó el pago.");
+  const movement: CashMovement = {
+    id: crypto.randomUUID(),
+    movementType,
+    category,
+    amount,
+    movementDate,
+    paymentMethod: choice(v.paymentMethod, [
+      "Efectivo",
+      "Transferencia",
+      "Tarjeta",
+      "Otro",
+    ]),
+    beneficiary,
+    reference: text(v.reference, 120),
+    notes: text(v.notes, 1000),
+    sourceType: "Manual",
+    sourceId: crypto.randomUUID(),
+    status: "Aplicado",
+    cancellationReason: "",
+    revision: 1,
+    createdBy: user.email,
+    cancelledBy: "",
+    createdAt: new Date().toISOString(),
+    cancelledAt: "",
+  };
+  await env.DB.batch([
+    cashMovementStatement(env.DB, { ...movement, sourceId: movement.sourceId }),
+    env.DB.prepare(
+      "INSERT INTO audit(id,record_id,actor,action,after_data) VALUES(?,?,?,?,?)",
+    ).bind(
+      crypto.randomUUID(),
+      movement.id,
+      user.email,
+      `Registrar ${movement.movementType.toLowerCase()} de caja`,
+      JSON.stringify(movement),
+    ),
+  ]);
+  return json(movement, 201);
+}
+async function cancelCashMovement(
+  request: Request,
+  env: Env,
+  user: { email: string; role: string },
+  id: string,
+) {
+  if (user.role !== "Administrador")
+    throw new Failure(
+      403,
+      "Solo administradores pueden cancelar movimientos de caja.",
+    );
+  if (!env.DB) throw new Failure(503, "Caja pendiente de conexión.");
+  const v = await body(request),
+    revision = number(v.revision, 1e9),
+    reason = text(v.reason, 1000, true),
+    row = await env.DB.prepare(
+      "SELECT source_type,status,revision FROM cash_movements WHERE id=?",
+    )
+      .bind(id)
+      .first<{
+        source_type: CashMovement["sourceType"];
+        status: CashMovement["status"];
+        revision: number;
+      }>();
+  if (!row) throw new Failure(404, "Movimiento no encontrado.");
+  if (row.source_type !== "Manual")
+    throw new Failure(
+      400,
+      "Cancela este movimiento desde su operación de origen.",
+    );
+  if (row.status !== "Aplicado")
+    throw new Failure(400, "Este movimiento ya fue cancelado.");
+  if (row.revision !== revision)
+    throw new Failure(409, "El movimiento cambió. Recarga antes de continuar.");
+  const result = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE cash_movements SET status='Cancelado',cancellation_reason=?,cancelled_by=?,cancelled_at=CURRENT_TIMESTAMP,revision=revision+1 WHERE id=? AND revision=? AND status='Aplicado'",
+    ).bind(reason, user.email, id, revision),
+    env.DB.prepare(
+      "INSERT INTO audit(id,record_id,actor,action,after_data) VALUES(?,?,?,?,?)",
+    ).bind(
+      crypto.randomUUID(),
+      id,
+      user.email,
+      "Cancelar movimiento de caja",
+      JSON.stringify({ reason }),
+    ),
+  ]);
+  if (result[0].meta.changes !== 1)
+    throw new Failure(409, "El movimiento cambió durante la cancelación.");
+  return json({ ok: true, status: "Cancelado", revision: revision + 1 });
+}
+async function registerCashClosing(
+  request: Request,
+  env: Env,
+  user: { email: string; role: string },
+) {
+  if (user.role !== "Administrador")
+    throw new Failure(
+      403,
+      "Solo administradores pueden realizar cierres de caja.",
+    );
+  if (!env.DB) throw new Failure(503, "Caja pendiente de conexión.");
+  const v = await body(request),
+    closingDate = date(v.closingDate, true),
+    paymentMethod = choice(v.paymentMethod, [
+      "Efectivo",
+      "Transferencia",
+      "Tarjeta",
+      "Otro",
+    ]),
+    countedAmount = Math.round(number(v.countedAmount) * 100) / 100;
+  if (countedAmount < 0)
+    throw new Failure(400, "El importe contado no puede ser negativo.");
+  const balance = await env.DB.prepare(
+      "SELECT COALESCE(SUM(CASE WHEN movement_type='Ingreso' THEN amount ELSE -amount END),0) amount FROM cash_movements WHERE status='Aplicado' AND payment_method=? AND movement_date<=?",
+    )
+      .bind(paymentMethod, closingDate)
+      .first<{ amount: number }>(),
+    expectedAmount = Math.round((balance?.amount || 0) * 100) / 100,
+    difference = Math.round((countedAmount - expectedAmount) * 100) / 100,
+    closing: CashClosing = {
+      id: crypto.randomUUID(),
+      closingDate,
+      paymentMethod,
+      expectedAmount,
+      countedAmount,
+      difference,
+      notes: text(v.notes, 1000),
+      createdBy: user.email,
+      createdAt: new Date().toISOString(),
+    };
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO cash_closings(id,closing_date,payment_method,expected_amount,counted_amount,difference,notes,created_by) VALUES(?,?,?,?,?,?,?,?)",
+      ).bind(
+        closing.id,
+        closing.closingDate,
+        closing.paymentMethod,
+        closing.expectedAmount,
+        closing.countedAmount,
+        closing.difference,
+        closing.notes,
+        user.email,
+      ),
+      env.DB.prepare(
+        "INSERT INTO audit(id,record_id,actor,action,after_data) VALUES(?,?,?,?,?)",
+      ).bind(
+        crypto.randomUUID(),
+        closing.id,
+        user.email,
+        "Realizar cierre de caja",
+        JSON.stringify(closing),
+      ),
+    ]);
+  } catch (e) {
+    if (String(e).includes("UNIQUE"))
+      throw new Failure(
+        409,
+        "Ya existe un cierre para esa fecha y forma de pago.",
+      );
+    throw e;
+  }
+  return json(closing, 201);
+}
 async function resetStatus(env: Env, user: { role: string }) {
   if (user.role !== "Administrador")
     throw new Failure(403, "Solo administradores.");
   if (!env.DB) throw new Failure(503, "Base de datos pendiente de conexión.");
-  const [control, customers, sales, payments, receipts, deliveries, records] =
-    await Promise.all([
-      env.DB.prepare(
-        "SELECT reset_locked,locked_at,locked_by FROM test_data_control WHERE id=1",
-      ).first<{ reset_locked: number; locked_at: string; locked_by: string }>(),
-      env.DB.prepare("SELECT COUNT(*) count FROM customers").first<{
-        count: number;
-      }>(),
-      env.DB.prepare("SELECT COUNT(*) count FROM sales").first<{
-        count: number;
-      }>(),
-      env.DB.prepare("SELECT COUNT(*) count FROM payments").first<{
-        count: number;
-      }>(),
-      env.DB.prepare("SELECT COUNT(*) count FROM receipts").first<{
-        count: number;
-      }>(),
-      env.DB.prepare("SELECT COUNT(*) count FROM owner_deliveries").first<{
-        count: number;
-      }>(),
-      env.DB.prepare("SELECT COUNT(*) count FROM records").first<{
-        count: number;
-      }>(),
-    ]);
+  const [
+    control,
+    customers,
+    sales,
+    payments,
+    receipts,
+    deliveries,
+    cash,
+    records,
+  ] = await Promise.all([
+    env.DB.prepare(
+      "SELECT reset_locked,locked_at,locked_by FROM test_data_control WHERE id=1",
+    ).first<{ reset_locked: number; locked_at: string; locked_by: string }>(),
+    env.DB.prepare("SELECT COUNT(*) count FROM customers").first<{
+      count: number;
+    }>(),
+    env.DB.prepare("SELECT COUNT(*) count FROM sales").first<{
+      count: number;
+    }>(),
+    env.DB.prepare("SELECT COUNT(*) count FROM payments").first<{
+      count: number;
+    }>(),
+    env.DB.prepare("SELECT COUNT(*) count FROM receipts").first<{
+      count: number;
+    }>(),
+    env.DB.prepare("SELECT COUNT(*) count FROM owner_deliveries").first<{
+      count: number;
+    }>(),
+    env.DB.prepare("SELECT COUNT(*) count FROM cash_movements").first<{
+      count: number;
+    }>(),
+    env.DB.prepare("SELECT COUNT(*) count FROM records").first<{
+      count: number;
+    }>(),
+  ]);
   return {
     locked: !!control?.reset_locked,
     lockedAt: control?.locked_at || "",
@@ -1468,6 +1788,7 @@ async function resetStatus(env: Env, user: { role: string }) {
       payments: payments?.count || 0,
       receipts: receipts?.count || 0,
       deliveries: deliveries?.count || 0,
+      cash: cash?.count || 0,
       catalog: records?.count || 0,
     },
   };
@@ -1525,6 +1846,8 @@ async function resetTestData(
     }
   }
   statements.push(
+    env.DB.prepare("DELETE FROM cash_closings"),
+    env.DB.prepare("DELETE FROM cash_movements"),
     env.DB.prepare("DELETE FROM owner_deliveries"),
     env.DB.prepare("DELETE FROM receipts"),
     env.DB.prepare("DELETE FROM payments"),
@@ -1720,6 +2043,22 @@ export default {
           return json(await catalog(env));
         if (path === "/api/admin/business" && request.method === "GET")
           return json(await business(env, user));
+        if (path === "/api/admin/cash" && request.method === "GET")
+          return json(await cashData(env, user));
+        if (path === "/api/admin/cash/movements" && request.method === "POST")
+          return await registerCashMovement(request, env, user);
+        if (path === "/api/admin/cash/closings" && request.method === "POST")
+          return await registerCashClosing(request, env, user);
+        const cashCancellation = path.match(
+          /^\/api\/admin\/cash\/movements\/([a-f0-9-]{36})\/cancel$/,
+        );
+        if (cashCancellation && request.method === "POST")
+          return await cancelCashMovement(
+            request,
+            env,
+            user,
+            cashCancellation[1],
+          );
         if (path === "/api/admin/test-data" && request.method === "GET")
           return json(await resetStatus(env, user));
         if (path === "/api/admin/test-data/reset" && request.method === "POST")

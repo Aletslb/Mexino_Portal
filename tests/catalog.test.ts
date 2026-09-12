@@ -36,6 +36,7 @@ for (const migration of [
   "0003_payments.sql",
   "0004_owner_deliveries.sql",
   "0005_receipts_and_reset.sql",
+  "0006_cash_control.sql",
 ]) {
   const sql = await readFile(
     new URL(`../migrations/${migration}`, import.meta.url),
@@ -713,6 +714,90 @@ test("upload is private until linked to a published property and becomes private
     200,
   );
   assert.equal((await request(url, "GET", undefined, null)).status, 401);
+});
+test("cash is admin-only, separated from collections and supports closing and cancellation", async () => {
+  const advisor = await token("advisor@example.test");
+  assert.equal(
+    (await request("/api/admin/cash", "GET", undefined, advisor)).status,
+    403,
+  );
+  let cash = (await (await request("/api/admin/cash")).json()) as {
+    movements: Array<{
+      id: string;
+      revision: number;
+      sourceType: string;
+      amount: number;
+      movementType: string;
+      status: string;
+    }>;
+    closings: unknown[];
+  };
+  assert.deepEqual(cash.movements, []);
+  let response = await request("/api/admin/cash/movements", "POST", {
+    movementType: "Ingreso",
+    category: "Comisión",
+    amount: 5000,
+    movementDate: "2026-09-12",
+    paymentMethod: "Efectivo",
+    beneficiary: "",
+    reference: "COM-1",
+    notes: "Comisión cobrada",
+  });
+  assert.equal(response.status, 201);
+  response = await request("/api/admin/cash/movements", "POST", {
+    movementType: "Gasto",
+    category: "Nómina",
+    amount: 1200,
+    movementDate: "2026-09-12",
+    paymentMethod: "Efectivo",
+    beneficiary: "Colaborador",
+    reference: "NOM-1",
+    notes: "Pago semanal",
+  });
+  assert.equal(response.status, 201);
+  const expense = (await response.json()) as { id: string; revision: number };
+  response = await request("/api/admin/cash/closings", "POST", {
+    closingDate: "2026-09-12",
+    paymentMethod: "Efectivo",
+    countedAmount: 3800,
+    notes: "Cierre correcto",
+  });
+  assert.equal(response.status, 201);
+  assert.equal(
+    ((await response.json()) as { difference: number }).difference,
+    0,
+  );
+  assert.equal(
+    (
+      await request("/api/admin/cash/closings", "POST", {
+        closingDate: "2026-09-12",
+        paymentMethod: "Efectivo",
+        countedAmount: 3800,
+        notes: "Duplicado",
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await request(`/api/admin/cash/movements/${expense.id}/cancel`, "POST", {
+        revision: expense.revision,
+        reason: "Captura duplicada",
+      })
+    ).status,
+    200,
+  );
+  cash = (await (await request("/api/admin/cash")).json()) as typeof cash;
+  assert.equal(
+    cash.movements
+      .filter((x) => x.status === "Aplicado")
+      .reduce(
+        (sum, x) => sum + (x.movementType === "Ingreso" ? x.amount : -x.amount),
+        0,
+      ),
+    5000,
+  );
+  assert.ok(cash.movements.every((x) => x.sourceType === "Manual"));
 });
 test("receipts are sequential and test cleanup is protected and permanent", async () => {
   const before = (await (

@@ -18,6 +18,7 @@ import type {
 } from "./model";
 import PlanView from "./PlanView";
 import SalesAdmin from "./SalesAdmin";
+import CashAdmin from "./CashAdmin";
 const MapView = lazy(() => import("./MapView"));
 type User = { email: string; role: string };
 type Audit = {
@@ -37,6 +38,7 @@ type ResetStatus = {
     payments: number;
     receipts: number;
     deliveries: number;
+    cash: number;
     catalog: number;
   };
 };
@@ -589,6 +591,9 @@ function TestDataTools({ onReset }: { onReset: () => Promise<void> }) {
             </span>
             <span>
               <strong>{status.counts.deliveries}</strong> entregas
+            </span>
+            <span>
+              <strong>{status.counts.cash}</strong> movimientos de caja
             </span>
             <span>
               <strong>{status.counts.catalog}</strong> registros de catálogo
@@ -1511,7 +1516,7 @@ export default function Admin() {
             "Clientes",
             "Ventas",
             ...(user.role === "Administrador"
-              ? ["Recibos", "Ajustes", "Historial"]
+              ? ["Recibos", "Caja", "Ajustes", "Historial"]
               : []),
           ].map((s) => (
             <button
@@ -1563,6 +1568,8 @@ export default function Admin() {
               onDone={done}
               onReload={reload}
             />
+          ) : section === "Caja" ? (
+            <CashAdmin />
           ) : ["Clientes", "Ventas", "Recibos"].includes(section) ? (
             <SalesAdmin
               section={section as "Clientes" | "Ventas" | "Recibos"}
@@ -1652,8 +1659,7 @@ export default function Admin() {
                   </div>
                   <div className="notice">
                     Clientes, ventas, cobranza, recibos y entregas a
-                    propietarios ya están disponibles. El control de caja se
-                    incorporará en la siguiente etapa.
+                    propietarios y caja operativa ya están disponibles.
                   </div>
                 </>
               )}

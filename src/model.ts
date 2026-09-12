@@ -126,6 +126,48 @@ export type Receipt = {
   issuedDate: string;
   createdAt: string;
 };
+export type CashMovement = {
+  id: string;
+  movementType: "Ingreso" | "Gasto";
+  category:
+    | "Cobro de cliente"
+    | "Entrega a propietario"
+    | "Comisión"
+    | "Nómina"
+    | "Honorarios"
+    | "Gasto operativo"
+    | "Otro";
+  amount: number;
+  movementDate: string;
+  paymentMethod: Sale["paymentMethod"];
+  beneficiary: string;
+  reference: string;
+  notes: string;
+  sourceType: "Manual";
+  sourceId: string;
+  status: "Aplicado" | "Cancelado";
+  cancellationReason: string;
+  revision: number;
+  createdBy: string;
+  cancelledBy: string;
+  createdAt: string;
+  cancelledAt: string;
+};
+export type CashClosing = {
+  id: string;
+  closingDate: string;
+  paymentMethod: Sale["paymentMethod"];
+  expectedAmount: number;
+  countedAmount: number;
+  difference: number;
+  notes: string;
+  createdBy: string;
+  createdAt: string;
+};
+export type CashData = {
+  movements: CashMovement[];
+  closings: CashClosing[];
+};
 export type Installment = {
   number: number;
   dueDate: string;

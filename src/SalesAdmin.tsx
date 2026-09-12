@@ -14,6 +14,7 @@ import type {
   Customer,
   OwnerDelivery,
   Payment,
+  Receipt,
   Sale,
 } from "./model";
 
@@ -734,6 +735,7 @@ function ReceiptsAndDeliveries({
   sale,
   payments,
   deliveries,
+  receipts,
   customer,
   assetName,
   role,
@@ -742,6 +744,7 @@ function ReceiptsAndDeliveries({
   sale: Sale;
   payments: Payment[];
   deliveries: OwnerDelivery[];
+  receipts: Receipt[];
   customer?: Customer;
   assetName: string;
   role: string;
@@ -766,7 +769,10 @@ function ReceiptsAndDeliveries({
     [error, setError] = useState(""),
     [success, setSuccess] = useState("");
   const initialReceipt: ReceiptRecord = {
-    folio: receiptFolio(sale.id, sale.saleDate, "INI-"),
+    folio:
+      receipts.find(
+        (item) => item.sourceType === "Inicial" && item.sourceId === sale.id,
+      )?.folio || receiptFolio(sale.id, sale.saleDate, "INI-"),
     date: sale.saleDate,
     concept: "Apartado y enganche inicial",
     amount: summary.initialPaid,
@@ -891,7 +897,12 @@ function ReceiptsAndDeliveries({
               {salePayments.map((payment) => {
                 const application = paymentApplication(sale, payments, payment);
                 const record: ReceiptRecord = {
-                  folio: receiptFolio(payment.id, payment.paymentDate),
+                  folio:
+                    receipts.find(
+                      (item) =>
+                        item.sourceType === "Pago" &&
+                        item.sourceId === payment.id,
+                    )?.folio || receiptFolio(payment.id, payment.paymentDate),
                   date: payment.paymentDate,
                   concept: payment.kind,
                   amount: payment.amount,
@@ -1139,6 +1150,7 @@ function PaymentPanel({
   sale,
   payments,
   deliveries,
+  receipts,
   customer,
   assetName,
   role,
@@ -1148,6 +1160,7 @@ function PaymentPanel({
   sale: Sale;
   payments: Payment[];
   deliveries: OwnerDelivery[];
+  receipts: Receipt[];
   customer?: Customer;
   assetName: string;
   role: string;
@@ -1500,6 +1513,7 @@ function PaymentPanel({
         sale={sale}
         payments={payments}
         deliveries={deliveries}
+        receipts={receipts}
         customer={customer}
         assetName={assetName}
         role={role}
@@ -1509,12 +1523,196 @@ function PaymentPanel({
   );
 }
 
+function ReceiptAdmin({
+  data,
+  catalog,
+}: {
+  data: BusinessData;
+  catalog: Catalog;
+}) {
+  const [query, setQuery] = useState(""),
+    [selected, setSelected] = useState<{
+      record: ReceiptRecord;
+      sale: Sale;
+      customer?: Customer;
+      assetName: string;
+    } | null>(null);
+  function assetName(sale: Sale) {
+    const property = catalog.properties.find(
+      (item) => item.id === sale.assetId,
+    );
+    if (property) return property.title;
+    const lot = catalog.lots.find((item) => item.id === sale.assetId),
+      development =
+        lot &&
+        catalog.developments.find((item) => item.id === lot.developmentId);
+    return lot
+      ? `${development?.title || "Fraccionamiento"} · M${lot.block} L${lot.number}`
+      : "Inmueble no encontrado";
+  }
+  const entries = data.receipts
+    .flatMap((receipt) => {
+      const sale = data.sales.find((item) => item.id === receipt.saleId);
+      if (!sale) return [];
+      const customer = data.customers.find(
+          (item) => item.id === sale.customerId,
+        ),
+        name = assetName(sale);
+      if (receipt.sourceType === "Inicial") {
+        const summary = saleBalance(sale, data.payments),
+          amount = summary.initialPaid;
+        return [
+          {
+            receipt,
+            sale,
+            customer,
+            assetName: name,
+            record: {
+              folio: receipt.folio,
+              date: receipt.issuedDate,
+              concept: "Apartado y enganche inicial",
+              amount,
+              method: sale.paymentMethod,
+              reference: "",
+              status:
+                sale.status === "Cancelada"
+                  ? ("Cancelado" as const)
+                  : ("Aplicado" as const),
+              currentBalance: summary.balance,
+              applications: [
+                ...(sale.reservationAmount > 0
+                  ? [`Apartado: ${money(sale.reservationAmount)}`]
+                  : []),
+                ...(sale.downPayment > 0
+                  ? [`Enganche: ${money(sale.downPayment)}`]
+                  : []),
+              ],
+            },
+          },
+        ];
+      }
+      const payment = data.payments.find(
+        (item) => item.id === receipt.sourceId,
+      );
+      if (!payment) return [];
+      const application = paymentApplication(sale, data.payments, payment);
+      return [
+        {
+          receipt,
+          sale,
+          customer,
+          assetName: name,
+          record: {
+            folio: receipt.folio,
+            date: payment.paymentDate,
+            concept: payment.kind,
+            amount: payment.amount,
+            method: payment.paymentMethod,
+            reference: payment.reference,
+            status: payment.status,
+            currentBalance: application.currentBalance,
+            applications: application.applications,
+            issuedBy: payment.createdBy,
+          },
+        },
+      ];
+    })
+    .filter((entry) =>
+      `${entry.receipt.folio} ${entry.customer?.name || ""} ${entry.assetName}`
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+    );
+  if (selected)
+    return (
+      <PrintableReceipt
+        {...selected}
+        title="RECIBO DE PAGO"
+        onBack={() => setSelected(null)}
+      />
+    );
+  return (
+    <div className="business-admin">
+      <div className="section-top">
+        <div>
+          <p className="eyebrow">CONTROL DOCUMENTAL</p>
+          <h1>Recibos</h1>
+          <p className="muted">
+            Consulta y reimprime todos los comprobantes foliados.
+          </p>
+        </div>
+        <div className="receipt-counter">
+          <span>Total emitidos</span>
+          <strong>{data.receipts.length}</strong>
+        </div>
+      </div>
+      <Field label="Buscar por folio, cliente o inmueble">
+        <input
+          className="admin-search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="CM-2026-000001"
+        />
+      </Field>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Folio</th>
+              <th>Fecha</th>
+              <th>Cliente</th>
+              <th>Inmueble</th>
+              <th>Concepto</th>
+              <th>Cantidad</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((entry) => (
+              <tr key={entry.receipt.id}>
+                <td>
+                  <strong>{entry.receipt.folio}</strong>
+                </td>
+                <td>{displayDate(entry.record.date)}</td>
+                <td>{entry.customer?.name || "Cliente no encontrado"}</td>
+                <td>{entry.assetName}</td>
+                <td>{entry.record.concept}</td>
+                <td>{money(entry.record.amount)}</td>
+                <td>
+                  <span
+                    className={`payment-status ${entry.record.status.toLowerCase()}`}
+                  >
+                    {entry.record.status}
+                  </span>
+                </td>
+                <td>
+                  <button
+                    className="text-button"
+                    onClick={() => setSelected(entry)}
+                  >
+                    Ver recibo
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!entries.length && (
+          <div className="empty">
+            No hay recibos que coincidan con la búsqueda.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SalesAdmin({
   section,
   role,
   catalog,
 }: {
-  section: "Clientes" | "Ventas";
+  section: "Clientes" | "Ventas" | "Recibos";
   role: string;
   catalog: Catalog;
 }) {
@@ -1523,6 +1721,7 @@ export default function SalesAdmin({
       sales: [],
       payments: [],
       deliveries: [],
+      receipts: [],
     }),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
@@ -1596,6 +1795,7 @@ export default function SalesAdmin({
         sale={collectionSale}
         payments={data.payments}
         deliveries={data.deliveries}
+        receipts={data.receipts}
         customer={data.customers.find(
           (c) => c.id === collectionSale.customerId,
         )}
@@ -1611,6 +1811,8 @@ export default function SalesAdmin({
         Cargando {section.toLowerCase()}…
       </div>
     );
+  if (section === "Recibos")
+    return <ReceiptAdmin data={data} catalog={catalog} />;
   return (
     <div className="business-admin">
       {error && (

@@ -1821,6 +1821,26 @@ textarea:focus-visible {
 .receipt-grid small {
   color: var(--muted);
 }
+.receipt-application {
+  margin-top: 18px;
+  padding: 18px 20px;
+  border: 1px solid #dce2e8;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.receipt-application > span {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.receipt-application strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--navy);
+}
 .receipt-total {
   display: flex;
   align-items: end;
@@ -1970,25 +1990,38 @@ textarea:focus-visible {
   }
 }
 @media print {
-  body * {
-    visibility: hidden !important;
+  html,
+  body,
+  #root,
+  .admin-shell,
+  .admin-content,
+  .collection-detail,
+  .receipt-view {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
   }
-  .receipt-sheet,
-  .receipt-sheet * {
-    visibility: visible !important;
+  .sidebar,
+  .admin-topbar,
+  .collection-detail > :not(.receipt-view),
+  .receipt-actions {
+    display: none !important;
   }
   .receipt-sheet {
-    position: absolute;
-    inset: 0;
+    position: static;
     width: 100%;
     max-width: none;
     border: 0;
     border-radius: 0;
     box-shadow: none;
-    padding: 24px;
-  }
-  .receipt-actions {
-    display: none !important;
+    padding: 0;
+    break-after: avoid;
+    page-break-after: avoid;
   }
   @page {
     size: auto;

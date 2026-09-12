@@ -513,6 +513,11 @@ export function validateSettings(v: Record<string, unknown>): PortalSettings {
     whatsapp: text(v.whatsapp, 35),
     email: text(v.email, 160),
     address: text(v.address, 240),
+    aboutTitle: text(v.aboutTitle, 120, true),
+    aboutStory: text(v.aboutStory, 1200, true),
+    aboutExperience: text(v.aboutExperience, 500, true),
+    aboutMission: text(v.aboutMission, 500, true),
+    officeHours: text(v.officeHours, 120),
   };
 }
 function commission(v: Record<string, unknown>) {

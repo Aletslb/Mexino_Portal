@@ -443,6 +443,26 @@ function SettingsEditor({
               </Field>
             </div>
           </fieldset>
+          <fieldset disabled={saving}>
+            <legend>Página Nosotros</legend>
+            <Field label="Título principal">
+              <input required maxLength={120} value={value.aboutTitle} onChange={(e) => change({ aboutTitle: e.target.value })} />
+            </Field>
+            <Field label="Nuestra historia">
+              <textarea required rows={6} maxLength={1200} value={value.aboutStory} onChange={(e) => change({ aboutStory: e.target.value })} />
+            </Field>
+            <div className="form-grid">
+              <Field label="Experiencia y enfoque">
+                <textarea required rows={4} maxLength={500} value={value.aboutExperience} onChange={(e) => change({ aboutExperience: e.target.value })} />
+              </Field>
+              <Field label="Compromiso">
+                <textarea required rows={4} maxLength={500} value={value.aboutMission} onChange={(e) => change({ aboutMission: e.target.value })} />
+              </Field>
+            </div>
+            <Field label="Horario o modalidad de atención">
+              <input maxLength={120} placeholder="Ej. Lunes a viernes, 9:00 a 18:00" value={value.officeHours} onChange={(e) => change({ officeHours: e.target.value })} />
+            </Field>
+          </fieldset>
         </div>
         <aside className="settings-preview">
           <p className="eyebrow">VISTA PREVIA</p>

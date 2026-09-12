@@ -152,6 +152,8 @@ async function saveSale(request:Request,env:Env,user:{email:string;role:string})
   if(!Number.isInteger(value.revision)||!Number.isInteger(value.termMonths))throw new Failure(400,'Revisa la versión y el plazo.');
   if(value.status==='Apartado'&&(!value.reservationAmount||!value.nextPaymentDate))throw new Failure(400,'El apartado requiere cantidad y fecha del siguiente pago.');
   if(value.agreedPrice<=0||value.reservationAmount+value.downPayment>value.agreedPrice)throw new Failure(400,'Revisa el precio pactado, apartado y enganche.');
+  const financed=Math.max(0,value.agreedPrice-value.reservationAmount-value.downPayment);
+  if(financed>0&&(value.monthlyPayment<=0||value.termMonths<=0||value.monthlyPayment*value.termMonths+0.01<financed))throw new Failure(400,'La mensualidad y el plazo deben cubrir completamente el saldo financiado.');
   if(!await env.DB.prepare('SELECT id FROM customers WHERE id=?').bind(value.customerId).first())throw new Failure(400,'Cliente no encontrado.');
   const old=await env.DB.prepare('SELECT id,asset_type,asset_id,status,revision FROM sales WHERE id=?').bind(value.id).first<{id:string;asset_type:string;asset_id:string;status:string;revision:number}>();
   if((old&&old.revision!==value.revision)||(!old&&value.revision!==0))throw new Failure(409,'Otra persona actualizó esta venta. Recarga antes de guardar.');

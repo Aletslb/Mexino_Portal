@@ -35,6 +35,7 @@ for (const migration of [
   "0002_customers_sales.sql",
   "0003_payments.sql",
   "0004_owner_deliveries.sql",
+  "0005_receipts_and_reset.sql",
 ]) {
   const sql = await readFile(
     new URL(`../migrations/${migration}`, import.meta.url),
@@ -712,4 +713,77 @@ test("upload is private until linked to a published property and becomes private
     200,
   );
   assert.equal((await request(url, "GET", undefined, null)).status, 401);
+});
+test("receipts are sequential and test cleanup is protected and permanent", async () => {
+  const before = (await (
+    await request("/api/admin/business")
+  ).json()) as BusinessData;
+  assert.ok(before.receipts.length >= 2);
+  const folios = before.receipts.map((receipt) => receipt.folio);
+  assert.equal(new Set(folios).size, folios.length);
+  assert.ok(folios.every((folio) => /^CM-\d{4}-\d{6}$/.test(folio)));
+
+  const advisor = await token("advisor@example.test");
+  assert.equal(
+    (
+      await request(
+        "/api/admin/test-data/reset",
+        "POST",
+        { confirmation: "BORRAR DATOS DE PRUEBA", includeCatalog: false },
+        advisor,
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request("/api/admin/test-data/reset", "POST", {
+        confirmation: "borrar",
+        includeCatalog: false,
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("/api/admin/test-data/reset", "POST", {
+        confirmation: "BORRAR DATOS DE PRUEBA",
+        includeCatalog: false,
+      })
+    ).status,
+    200,
+  );
+  const after = (await (
+    await request("/api/admin/business")
+  ).json()) as BusinessData;
+  assert.deepEqual(after.customers, []);
+  assert.deepEqual(after.sales, []);
+  assert.deepEqual(after.payments, []);
+  assert.deepEqual(after.receipts, []);
+  assert.deepEqual(after.deliveries, []);
+  const catalog = (await (await request("/api/admin/catalog")).json()) as {
+    properties: Array<{ status: string }>;
+  };
+  assert.ok(catalog.properties.length > 0);
+  assert.ok(
+    catalog.properties.every((property) => property.status === "Disponible"),
+  );
+
+  assert.equal(
+    (
+      await request("/api/admin/test-data/lock", "POST", {
+        confirmation: "INICIAR OPERACION REAL",
+      })
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await request("/api/admin/test-data/reset", "POST", {
+        confirmation: "BORRAR DATOS DE PRUEBA",
+        includeCatalog: false,
+      })
+    ).status,
+    423,
+  );
 });

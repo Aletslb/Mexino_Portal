@@ -115,6 +115,17 @@ export type OwnerDelivery = {
   createdAt: string;
   cancelledAt: string;
 };
+export type Receipt = {
+  id: string;
+  saleId: string;
+  sourceType: "Inicial" | "Pago";
+  sourceId: string;
+  folio: string;
+  sequenceYear: number;
+  sequenceNumber: number;
+  issuedDate: string;
+  createdAt: string;
+};
 export type Installment = {
   number: number;
   dueDate: string;
@@ -145,6 +156,7 @@ export type BusinessData = {
   sales: Sale[];
   payments: Payment[];
   deliveries: OwnerDelivery[];
+  receipts: Receipt[];
 };
 export type PortalSettings = {
   revision: number;

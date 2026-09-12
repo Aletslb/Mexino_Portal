@@ -1952,6 +1952,75 @@ textarea:focus-visible {
   background: #f7e7e8;
   color: #8c2730;
 }
+.receipt-counter {
+  min-width: 150px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+}
+.receipt-counter span,
+.receipt-counter strong {
+  display: block;
+}
+.receipt-counter strong {
+  margin-top: 6px;
+  color: var(--navy);
+  font-size: 1.7rem;
+}
+.test-data-tools {
+  margin-top: 30px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+}
+.test-data-tools h2,
+.test-data-tools h3 {
+  margin-top: 0;
+}
+.reset-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 24px 0;
+}
+.reset-counts span {
+  padding: 13px 15px;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+}
+.reset-counts strong {
+  margin-right: 5px;
+  color: var(--navy);
+}
+.danger-zone,
+.lock-zone {
+  margin-top: 20px;
+  padding: 22px;
+  border-radius: 14px;
+}
+.danger-zone {
+  border: 1px solid #e2b7bb;
+  background: #fff8f8;
+}
+.lock-zone {
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+.danger-zone .field,
+.lock-zone .field {
+  max-width: 540px;
+}
+.danger-button {
+  background: #9f1d28;
+}
+.danger-button:hover:not(:disabled) {
+  background: #811721;
+}
 @media (max-width: 1000px) {
   .settlement-metrics {
     grid-template-columns: 1fr 1fr;
@@ -1961,6 +2030,9 @@ textarea:focus-visible {
   }
 }
 @media (max-width: 620px) {
+  .reset-counts {
+    grid-template-columns: 1fr 1fr;
+  }
   .receipt-sheet {
     padding: 22px;
   }

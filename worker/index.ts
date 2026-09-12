@@ -12,6 +12,7 @@ import type {
   Sale,
   Payment,
   OwnerDelivery,
+  Receipt,
   BusinessData,
 } from "../src/model";
 
@@ -150,6 +151,17 @@ type DeliveryRow = {
   created_at: string;
   cancelled_at: string;
 };
+type ReceiptRow = {
+  id: string;
+  sale_id: string;
+  source_type: Receipt["sourceType"];
+  source_id: string;
+  folio: string;
+  sequence_year: number;
+  sequence_number: number;
+  issued_date: string;
+  created_at: string;
+};
 const settingsKey = "portal/settings.json";
 async function portalSettings(env: Env): Promise<PortalSettings> {
   if (!env.BUCKET) return { ...defaultPortalSettings };
@@ -255,13 +267,24 @@ const deliveryDto = (x: DeliveryRow): OwnerDelivery => ({
   createdAt: x.created_at,
   cancelledAt: x.cancelled_at,
 });
+const receiptDto = (x: ReceiptRow): Receipt => ({
+  id: x.id,
+  saleId: x.sale_id,
+  sourceType: x.source_type,
+  sourceId: x.source_id,
+  folio: x.folio,
+  sequenceYear: x.sequence_year,
+  sequenceNumber: x.sequence_number,
+  issuedDate: x.issued_date,
+  createdAt: x.created_at,
+});
 async function business(
   env: Env,
   user: { role: string },
 ): Promise<BusinessData> {
   if (!env.DB)
     throw new Failure(503, "Clientes y ventas están pendientes de conexión.");
-  const [customers, sales, payments, deliveries] = await Promise.all([
+  const [customers, sales, payments, deliveries, receipts] = await Promise.all([
     env.DB.prepare(
       "SELECT id,name,phone,address,notes,revision,created_at,updated_at FROM customers ORDER BY updated_at DESC",
     ).all<CustomerRow>(),
@@ -276,12 +299,16 @@ async function business(
           "SELECT id,sale_id,amount,delivery_date,payment_method,recipient,reference,notes,status,cancellation_reason,revision,created_by,cancelled_by,created_at,cancelled_at FROM owner_deliveries ORDER BY delivery_date DESC,created_at DESC",
         ).all<DeliveryRow>()
       : Promise.resolve({ results: [] } as unknown as D1Result<DeliveryRow>),
+    env.DB.prepare(
+      "SELECT id,sale_id,source_type,source_id,folio,sequence_year,sequence_number,issued_date,created_at FROM receipts ORDER BY sequence_year DESC,sequence_number DESC",
+    ).all<ReceiptRow>(),
   ]);
   return {
     customers: customers.results.map(customerDto),
     sales: sales.results.map(saleDto),
     payments: payments.results.map(paymentDto),
     deliveries: deliveries.results.map(deliveryDto),
+    receipts: receipts.results.map(receiptDto),
   };
 }
 export function publicCatalog(data: Catalog) {
@@ -448,6 +475,59 @@ function identifier(v: unknown) {
   if (!/^[a-f0-9-]{36}$/.test(value))
     throw new Failure(400, "Identificador no válido.");
   return value;
+}
+async function nextReceipt(
+  env: Env,
+  saleId: string,
+  sourceType: Receipt["sourceType"],
+  sourceId: string,
+  issuedDate: string,
+) {
+  if (!env.DB) throw new Failure(503, "Base de datos pendiente de conexión.");
+  const db = env.DB;
+  const year = Number(issuedDate.slice(0, 4));
+  await db
+    .prepare(
+      "INSERT OR IGNORE INTO receipt_sequences(sequence_year,next_number) VALUES(?,1)",
+    )
+    .bind(year)
+    .run();
+  const sequence = await db
+    .prepare(
+      "UPDATE receipt_sequences SET next_number=next_number+1 WHERE sequence_year=? RETURNING next_number-1 AS number",
+    )
+    .bind(year)
+    .first<{ number: number }>();
+  if (!sequence)
+    throw new Failure(503, "No fue posible generar el folio del recibo.");
+  const receipt: Receipt = {
+    id: crypto.randomUUID(),
+    saleId,
+    sourceType,
+    sourceId,
+    folio: `CM-${year}-${String(sequence.number).padStart(6, "0")}`,
+    sequenceYear: year,
+    sequenceNumber: sequence.number,
+    issuedDate,
+    createdAt: new Date().toISOString(),
+  };
+  return {
+    receipt,
+    statement: db
+      .prepare(
+        "INSERT INTO receipts(id,sale_id,source_type,source_id,folio,sequence_year,sequence_number,issued_date) VALUES(?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        receipt.id,
+        receipt.saleId,
+        receipt.sourceType,
+        receipt.sourceId,
+        receipt.folio,
+        receipt.sequenceYear,
+        receipt.sequenceNumber,
+        receipt.issuedDate,
+      ),
+  };
 }
 async function body(request: Request) {
   const raw = await request.text();
@@ -923,12 +1003,19 @@ async function saveSale(
           user.email,
           user.email,
         );
+  const initialReceipt =
+    !old && value.reservationAmount + value.downPayment > 0
+      ? await nextReceipt(env, value.id, "Inicial", value.id, value.saleDate)
+      : null;
   try {
-    const result = await env.DB.batch([
+    const statements = [
       saleMutation,
       env.DB.prepare(
         "UPDATE records SET data=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?",
       ).bind(JSON.stringify(inventory), asset.id, asset.revision),
+    ];
+    if (initialReceipt) statements.push(initialReceipt.statement);
+    statements.push(
       env.DB.prepare(
         "INSERT INTO audit(id,record_id,actor,action,after_data) SELECT ?,?,?,?,? WHERE changes()=1",
       ).bind(
@@ -938,7 +1025,8 @@ async function saveSale(
         old ? "Actualizar venta" : "Registrar venta",
         JSON.stringify(value),
       ),
-    ]);
+    );
+    const result = await env.DB.batch(statements);
     if (result[0].meta.changes !== 1 || result[1].meta.changes !== 1)
       throw new Failure(
         409,
@@ -1005,6 +1093,13 @@ async function registerPayment(
   };
   const liquidated = amount >= summary.balance - 0.001,
     nextStatus = liquidated ? "Liquidada" : sale.status;
+  const paymentReceipt = await nextReceipt(
+    env,
+    saleId,
+    "Pago",
+    payment.id,
+    payment.paymentDate,
+  );
   const result = await env.DB.batch([
     env.DB.prepare(
       "INSERT INTO payments(id,sale_id,amount,payment_date,payment_method,kind,reference,notes,status,sale_status_before,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -1021,6 +1116,7 @@ async function registerPayment(
       sale.status,
       user.email,
     ),
+    paymentReceipt.statement,
     env.DB.prepare(
       "UPDATE sales SET status=?,revision=revision+1,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?",
     ).bind(nextStatus, user.email, saleId, sale.revision),
@@ -1034,7 +1130,11 @@ async function registerPayment(
       JSON.stringify(payment),
     ),
   ]);
-  if (result[0].meta.changes !== 1 || result[1].meta.changes !== 1)
+  if (
+    result[0].meta.changes !== 1 ||
+    result[1].meta.changes !== 1 ||
+    result[2].meta.changes !== 1
+  )
     throw new Failure(
       409,
       "La venta cambió durante el pago. Recarga antes de intentarlo nuevamente.",
@@ -1330,6 +1430,140 @@ async function cancelSale(
     );
   return json({ ok: true, status: next, revision: revision + 1 });
 }
+async function resetStatus(env: Env, user: { role: string }) {
+  if (user.role !== "Administrador")
+    throw new Failure(403, "Solo administradores.");
+  if (!env.DB) throw new Failure(503, "Base de datos pendiente de conexión.");
+  const [control, customers, sales, payments, receipts, deliveries, records] =
+    await Promise.all([
+      env.DB.prepare(
+        "SELECT reset_locked,locked_at,locked_by FROM test_data_control WHERE id=1",
+      ).first<{ reset_locked: number; locked_at: string; locked_by: string }>(),
+      env.DB.prepare("SELECT COUNT(*) count FROM customers").first<{
+        count: number;
+      }>(),
+      env.DB.prepare("SELECT COUNT(*) count FROM sales").first<{
+        count: number;
+      }>(),
+      env.DB.prepare("SELECT COUNT(*) count FROM payments").first<{
+        count: number;
+      }>(),
+      env.DB.prepare("SELECT COUNT(*) count FROM receipts").first<{
+        count: number;
+      }>(),
+      env.DB.prepare("SELECT COUNT(*) count FROM owner_deliveries").first<{
+        count: number;
+      }>(),
+      env.DB.prepare("SELECT COUNT(*) count FROM records").first<{
+        count: number;
+      }>(),
+    ]);
+  return {
+    locked: !!control?.reset_locked,
+    lockedAt: control?.locked_at || "",
+    lockedBy: control?.locked_by || "",
+    counts: {
+      customers: customers?.count || 0,
+      sales: sales?.count || 0,
+      payments: payments?.count || 0,
+      receipts: receipts?.count || 0,
+      deliveries: deliveries?.count || 0,
+      catalog: records?.count || 0,
+    },
+  };
+}
+async function resetTestData(
+  request: Request,
+  env: Env,
+  user: { email: string; role: string },
+) {
+  if (user.role !== "Administrador")
+    throw new Failure(
+      403,
+      "Solo administradores pueden eliminar datos de prueba.",
+    );
+  if (!env.DB) throw new Failure(503, "Base de datos pendiente de conexión.");
+  const v = await body(request),
+    phrase = text(v.confirmation, 60, true),
+    includeCatalog = v.includeCatalog === true;
+  if (phrase !== "BORRAR DATOS DE PRUEBA")
+    throw new Failure(400, "Escribe exactamente BORRAR DATOS DE PRUEBA.");
+  const control = await env.DB.prepare(
+    "SELECT reset_locked FROM test_data_control WHERE id=1",
+  ).first<{ reset_locked: number }>();
+  if (control?.reset_locked)
+    throw new Failure(
+      423,
+      "La limpieza fue bloqueada para operación real y no puede reactivarse.",
+    );
+  const sales = await env.DB.prepare(
+    "SELECT DISTINCT asset_id FROM sales",
+  ).all<{ asset_id: string }>();
+  const statements = [];
+  if (!includeCatalog) {
+    for (const sale of sales.results) {
+      const row = await env.DB.prepare(
+        "SELECT id,kind,data,revision FROM records WHERE id=?",
+      )
+        .bind(sale.asset_id)
+        .first<Row>();
+      if (!row) continue;
+      const current = JSON.parse(row.data) as Property | Lot;
+      const restored = {
+        ...current,
+        status: "Disponible",
+        ...(row.kind === "lots"
+          ? { soldBy: "", reportedBy: "", reportedDate: "" }
+          : {}),
+        revision: row.revision + 1,
+      };
+      statements.push(
+        env.DB.prepare(
+          "UPDATE records SET data=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        ).bind(JSON.stringify(restored), row.id),
+      );
+    }
+  }
+  statements.push(
+    env.DB.prepare("DELETE FROM owner_deliveries"),
+    env.DB.prepare("DELETE FROM receipts"),
+    env.DB.prepare("DELETE FROM payments"),
+    env.DB.prepare("DELETE FROM sales"),
+    env.DB.prepare("DELETE FROM customers"),
+    env.DB.prepare("DELETE FROM receipt_sequences"),
+    env.DB.prepare("DELETE FROM audit"),
+  );
+  const uploadedObjects = includeCatalog
+    ? await env.DB.prepare("SELECT id FROM uploads").all<{ id: string }>()
+    : { results: [] as { id: string }[] };
+  if (includeCatalog)
+    statements.push(
+      env.DB.prepare("DELETE FROM records"),
+      env.DB.prepare("DELETE FROM uploads"),
+    );
+  await env.DB.batch(statements);
+  if (includeCatalog && env.BUCKET && uploadedObjects.results.length)
+    await env.BUCKET.delete(uploadedObjects.results.map((item) => item.id));
+  return json({ ok: true, includeCatalog });
+}
+async function lockTestReset(
+  request: Request,
+  env: Env,
+  user: { email: string; role: string },
+) {
+  if (user.role !== "Administrador")
+    throw new Failure(403, "Solo administradores.");
+  if (!env.DB) throw new Failure(503, "Base de datos pendiente de conexión.");
+  const v = await body(request);
+  if (text(v.confirmation, 40, true) !== "INICIAR OPERACION REAL")
+    throw new Failure(400, "Escribe exactamente INICIAR OPERACION REAL.");
+  await env.DB.prepare(
+    "UPDATE test_data_control SET reset_locked=1,locked_at=CURRENT_TIMESTAMP,locked_by=? WHERE id=1 AND reset_locked=0",
+  )
+    .bind(user.email)
+    .run();
+  return json({ ok: true, locked: true });
+}
 async function saveSettings(
   request: Request,
   env: Env,
@@ -1486,6 +1720,12 @@ export default {
           return json(await catalog(env));
         if (path === "/api/admin/business" && request.method === "GET")
           return json(await business(env, user));
+        if (path === "/api/admin/test-data" && request.method === "GET")
+          return json(await resetStatus(env, user));
+        if (path === "/api/admin/test-data/reset" && request.method === "POST")
+          return await resetTestData(request, env, user);
+        if (path === "/api/admin/test-data/lock" && request.method === "POST")
+          return await lockTestReset(request, env, user);
         if (path === "/api/admin/audit" && request.method === "GET") {
           if (user.role !== "Administrador")
             throw new Failure(403, "Solo administradores.");

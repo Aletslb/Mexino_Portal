@@ -1446,6 +1446,7 @@ function LotsEditor({
   );
 }
 export default function Admin() {
+  const accessReturn = new URLSearchParams(location.search).has("access");
   const [user, setUser] = useState<User | null>(null),
     [loading, setLoading] = useState(true),
     [authError, setAuthError] = useState(""),
@@ -1466,6 +1467,11 @@ export default function Admin() {
     }
   }
   useEffect(() => {
+    if (!accessReturn) {
+      setAuthError("Inicia sesión para continuar.");
+      setLoading(false);
+      return;
+    }
     api<User>("/api/admin/session")
       .then((u) => {
         setUser(u);
@@ -1473,7 +1479,7 @@ export default function Admin() {
       })
       .catch((e) => setAuthError((e as Error).message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [accessReturn]);
   function go(s: string) {
     setSection(s);
     setQuery("");

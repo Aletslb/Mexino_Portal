@@ -2036,6 +2036,11 @@ export default {
         });
       }
       if (path.startsWith("/api/admin/")) {
+        if (
+          ["/api/admin/login", "/api/admin/me"].includes(path) &&
+          request.method === "GET"
+        )
+          return Response.redirect(`${url.origin}/admin/?access=1`, 302);
         const user = await identity(request, env);
         if (
           request.method !== "GET" &&
@@ -2044,11 +2049,6 @@ export default {
           throw new Failure(403, "Origen no permitido.");
         if (path === "/api/admin/session" && request.method === "GET")
           return json(user);
-        if (
-          ["/api/admin/login", "/api/admin/me"].includes(path) &&
-          request.method === "GET"
-        )
-          return Response.redirect(`${url.origin}/admin/?access=1`, 302);
         if (path === "/api/admin/catalog" && request.method === "GET")
           return json(await catalog(env));
         if (path === "/api/admin/business" && request.method === "GET")

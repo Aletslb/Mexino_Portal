@@ -37,6 +37,7 @@ for (const migration of [
   "0004_owner_deliveries.sql",
   "0005_receipts_and_reset.sql",
   "0006_cash_control.sql",
+  "0007_owners_and_funds.sql",
 ]) {
   const sql = await readFile(
     new URL(`../migrations/${migration}`, import.meta.url),
@@ -181,6 +182,8 @@ test("public projection excludes private commission and reporter fields", () => 
     ...blankProperty(),
     title: "Casa",
     publication: "Publicado" as const,
+    ownershipType: "Tercero" as const,
+    ownerId: "PRIVATE-OWNER-ID",
   };
   const d = {
     ...blankDevelopment(),
@@ -200,6 +203,8 @@ test("public projection excludes private commission and reporter fields", () => 
     }),
   );
   assert.ok(!output.includes("commission"));
+  assert.ok(!output.includes("PRIVATE-OWNER-ID"));
+  assert.ok(!output.includes("ownershipType"));
   assert.ok(!output.includes("PERSONAL"));
   assert.ok(!output.includes("PRIVATE"));
   assert.ok(!output.includes("Borrador"));
@@ -554,10 +559,22 @@ test("partial and extraordinary payments reduce oldest installments; only admin 
   );
 });
 test("owner deliveries retain commission, enforce available funds and remain auditable when cancelled", async () => {
+  const owner = {
+    id: crypto.randomUUID(),
+    revision: 0,
+    name: "Propietario prueba",
+    phone: "4889998877",
+    address: "",
+    notes: "",
+    active: true,
+  };
+  assert.equal((await request("/api/admin/owners", "PUT", owner)).status, 200);
   const property = {
     ...blankProperty(),
     title: "Casa entregas",
     price: 100000,
+    ownershipType: "Tercero" as const,
+    ownerId: owner.id,
   };
   await request("/api/admin/properties", "PUT", property);
   const customer = {

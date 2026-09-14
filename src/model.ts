@@ -17,6 +17,8 @@ export type Property = {
   publication: "Borrador" | "Publicado" | "Oculto";
   commissionType: "Porcentaje" | "Monto";
   commissionValue: number;
+  ownershipType: "Casa Mexino" | "Tercero";
+  ownerId: string;
 };
 export type Development = {
   id: string;
@@ -29,6 +31,19 @@ export type Development = {
   commissionType: "Porcentaje" | "Monto";
   commissionValue: number;
   collection: boolean;
+  ownershipType: "Casa Mexino" | "Tercero";
+  ownerId: string;
+};
+export type Owner = {
+  id: string;
+  revision: number;
+  name: string;
+  phone: string;
+  address: string;
+  notes: string;
+  active: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 };
 export type Lot = {
   id: string;
@@ -74,6 +89,8 @@ export type Sale = {
   nextPaymentDate: string;
   commissionType: "Porcentaje" | "Monto";
   commissionValue: number;
+  ownershipType: "Casa Mexino" | "Tercero";
+  ownerId: string;
   ownerName: string;
   ownerPhone: string;
   cancellationNotes: string;
@@ -194,6 +211,7 @@ export type OwnerSettlement = {
   pendingDelivery: number;
 };
 export type BusinessData = {
+  owners: Owner[];
   customers: Customer[];
   sales: Sale[];
   payments: Payment[];
@@ -288,6 +306,8 @@ export function blankProperty(): Property {
     publication: "Borrador",
     commissionType: "Porcentaje",
     commissionValue: 3,
+    ownershipType: "Casa Mexino",
+    ownerId: "",
   };
 }
 export function blankDevelopment(): Development {
@@ -302,6 +322,8 @@ export function blankDevelopment(): Development {
     commissionType: "Porcentaje",
     commissionValue: 3,
     collection: false,
+    ownershipType: "Casa Mexino",
+    ownerId: "",
   };
 }
 export function blankLot(developmentId: string): Lot {
@@ -349,10 +371,23 @@ export function blankSale(): Sale {
     nextPaymentDate: "",
     commissionType: "Porcentaje",
     commissionValue: 3,
+    ownershipType: "Casa Mexino",
+    ownerId: "",
     ownerName: "",
     ownerPhone: "",
     cancellationNotes: "",
     cancellationResolution: "",
+  };
+}
+export function blankOwner(): Owner {
+  return {
+    id: crypto.randomUUID(),
+    revision: 0,
+    name: "",
+    phone: "",
+    address: "",
+    notes: "",
+    active: true,
   };
 }
 const cents = (value: number) => Math.round(value * 100) / 100;
@@ -471,6 +506,18 @@ export function ownerSettlement(
   payments: Payment[],
   deliveries: OwnerDelivery[],
 ): OwnerSettlement {
+  const thirdParty =
+    sale.ownershipType === "Tercero" ||
+    Boolean(sale.ownerId) ||
+    Boolean(sale.ownerName && sale.ownerName !== "Casa Mexino");
+  if (!thirdParty)
+    return {
+      contractedCommission: 0,
+      commissionRetained: 0,
+      ownerFundsAvailable: 0,
+      delivered: 0,
+      pendingDelivery: 0,
+    };
   const collected = saleBalance(sale, payments).totalPaid;
   const contractedCommission = cents(
     Math.min(

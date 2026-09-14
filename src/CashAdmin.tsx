@@ -36,6 +36,7 @@ const blankMovement = (): CashForm => ({
 export default function CashAdmin() {
   const [data, setData] = useState<CashData>({ movements: [], closings: [] }),
     [business, setBusiness] = useState<BusinessData>({
+      owners: [],
       customers: [],
       sales: [],
       payments: [],

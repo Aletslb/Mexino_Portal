@@ -216,11 +216,17 @@ function SaleForm({
         : catalog.developments.find(
             (d) => "developmentId" in asset && d.id === asset.developmentId,
           );
+    const owner = business.owners.find((item) => item.id === source?.ownerId);
     recalculate({
       assetId: id,
       agreedPrice: asset.price,
       commissionType: source?.commissionType ?? value.commissionType,
       commissionValue: source?.commissionValue ?? value.commissionValue,
+      ownershipType: source?.ownershipType ?? "Casa Mexino",
+      ownerId: source?.ownerId ?? "",
+      ownerName:
+        source?.ownershipType === "Tercero" ? owner?.name || "" : "Casa Mexino",
+      ownerPhone: source?.ownershipType === "Tercero" ? owner?.phone || "" : "",
     });
   }
   function assetName(id: string) {
@@ -411,8 +417,20 @@ function SaleForm({
           </p>
         </fieldset>
         <fieldset disabled={busy}>
-          <legend>Comisión y propietario</legend>
-          <div className="form-grid">
+          <legend>Liquidación interna</legend>
+          <div className="ownership-summary">
+            <span
+              className={`ownership-badge ${value.ownershipType === "Tercero" ? "third-party" : "own"}`}
+            >
+              {value.ownershipType === "Tercero"
+                ? `Tercero · ${value.ownerName || "Propietario pendiente"}`
+                : "Propiedad de Casa Mexino"}
+            </span>
+            <p className="muted">
+              Esta asignación proviene del inmueble y no puede modificarse desde la venta.
+            </p>
+          </div>
+          {value.ownershipType === "Tercero" && <div className="form-grid">
             <Field label="Tipo de comisión">
               <select
                 value={value.commissionType}
@@ -435,22 +453,7 @@ function SaleForm({
               value={value.commissionValue}
               onChange={(commissionValue) => change({ commissionValue })}
             />
-            <Field label="Nombre del propietario (opcional)">
-              <input
-                maxLength={160}
-                value={value.ownerName}
-                onChange={(e) => change({ ownerName: e.target.value })}
-              />
-            </Field>
-            <Field label="Teléfono del propietario (opcional)">
-              <input
-                type="tel"
-                maxLength={35}
-                value={value.ownerPhone}
-                onChange={(e) => change({ ownerPhone: e.target.value })}
-              />
-            </Field>
-          </div>
+          </div>}
         </fieldset>
       </div>
       {error && (
@@ -1717,6 +1720,7 @@ export default function SalesAdmin({
   catalog: Catalog;
 }) {
   const [data, setData] = useState<BusinessData>({
+      owners: [],
       customers: [],
       sales: [],
       payments: [],

@@ -146,8 +146,8 @@ test("anonymous writes and forged identities are rejected", async () => {
   );
 });
 
-test("authenticated login bridge returns to the admin panel", async () => {
-  const response = await request("/api/admin/me");
+test("login bridge returns to the protected admin panel without requiring identity", async () => {
+  const response = await request("/api/admin/me", "GET", undefined, null);
   assert.equal(response.status, 302);
   const location = new URL(response.headers.get("location")!);
   assert.equal(location.pathname, "/admin/");

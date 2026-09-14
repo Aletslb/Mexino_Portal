@@ -905,6 +905,333 @@ textarea:focus-visible {
   }
 }
 
+/* Pulido final: identidad inmobiliaria editorial, sobria y consistente. */
+:root {
+  --ink: #102238;
+  --muted: #617083;
+  --line: #d9dee4;
+  --navy: #0d3558;
+  --navy-dark: #09263f;
+  --red: #aa1f2b;
+  --red-dark: #861721;
+  --surface: #f7f6f3;
+  --soft-blue: #edf1f4;
+  --clay-bg: #f3f4f3;
+  --clay-shadow: 0 12px 34px rgba(18, 35, 52, 0.07),
+    0 2px 7px rgba(18, 35, 52, 0.04);
+  --clay-inset: inset 0 1px 2px rgba(18, 35, 52, 0.07);
+  --clay-dark: 0 8px 22px rgba(7, 30, 49, 0.18);
+}
+body {
+  background:
+    radial-gradient(circle at 82% 8%, rgba(25, 66, 98, 0.045), transparent 27rem),
+    var(--clay-bg);
+}
+
+/* Portal público */
+.public-header {
+  min-height: 88px;
+  margin-top: 14px;
+  padding: 9px 24px;
+  border-color: rgba(18, 42, 63, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(18, 35, 52, 0.055);
+}
+.public-header nav a {
+  padding: 11px 15px;
+  border-radius: 7px;
+  color: #263a50;
+  font-size: 0.84rem;
+  font-weight: 640;
+  letter-spacing: 0.012em;
+}
+.public-header nav a:hover {
+  background: #f1f3f4;
+  color: var(--navy);
+}
+.public-header nav a[aria-current] {
+  background: #e9edef;
+  box-shadow: none;
+}
+.admin-access {
+  border-radius: 7px;
+  background: var(--navy);
+  color: #fff;
+  box-shadow: 0 7px 18px rgba(9, 38, 63, 0.16);
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+}
+.brand-copy strong {
+  color: #123653;
+  letter-spacing: 0.055em;
+}
+.brand-copy small {
+  color: #78828e;
+}
+.editorial-hero {
+  gap: clamp(42px, 5vw, 76px);
+  padding-top: 36px;
+  padding-bottom: 86px;
+}
+.editorial-hero .intro-copy:before {
+  left: -24px;
+  top: 28px;
+  width: 2px;
+  height: 96px;
+  background: linear-gradient(var(--red) 0 28%, var(--navy) 28%);
+}
+.editorial-hero h1,
+.section-top h1,
+.detail-section h1,
+.catalog-section > h1,
+.development-heading h1,
+.about-page h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+  letter-spacing: -0.045em;
+}
+.editorial-hero h1 {
+  font-size: clamp(3rem, 4.45vw, 5.15rem);
+  line-height: 1.02;
+}
+.editorial-hero h1 em {
+  color: #173f61;
+  font-style: italic;
+  font-weight: 400;
+}
+.editorial-hero .eyebrow,
+.section-top .eyebrow,
+.catalog-section > .eyebrow,
+.detail-section .eyebrow,
+.about-page .eyebrow {
+  letter-spacing: 0.17em;
+  font-size: 0.69rem;
+}
+.hero-description {
+  color: #536477;
+  font-size: 1rem;
+  line-height: 1.78;
+}
+.editorial-hero .intro-photo {
+  height: 448px;
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  border-radius: 9px;
+  box-shadow: 0 25px 55px rgba(12, 37, 58, 0.15),
+    0 3px 10px rgba(12, 37, 58, 0.08);
+}
+.editorial-hero .intro-photo > img {
+  border-radius: 8px;
+}
+.image-caption,
+.hero-dots {
+  border-radius: 5px;
+}
+.button,
+.hero-actions .button {
+  border-radius: 7px;
+  padding: 14px 21px;
+  font-size: 0.88rem;
+  letter-spacing: 0.005em;
+}
+.hero-actions .button,
+.button.lime {
+  background: var(--red);
+  box-shadow: 0 8px 20px rgba(134, 23, 33, 0.18);
+}
+.hero-map-link {
+  color: #24445f;
+}
+.hero-services {
+  color: #3d5166;
+  border-color: #d2d7db;
+}
+.filters {
+  padding: 20px;
+  border-color: rgba(18, 42, 63, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(18, 35, 52, 0.065);
+}
+.filters input,
+.filters select,
+.field input,
+.field select,
+.field textarea {
+  border-color: #cfd6dc;
+  background: #fafafa;
+  border-radius: 7px;
+  box-shadow: none;
+}
+.segmented,
+.view-toggle {
+  border-radius: 8px;
+  background: #e9edef;
+  box-shadow: none;
+}
+.segmented button,
+.view-toggle a {
+  border-radius: 6px;
+}
+.segmented button.active {
+  background: var(--navy);
+  box-shadow: 0 4px 11px rgba(9, 38, 63, 0.16);
+}
+.listing,
+.development-card,
+.contact-box,
+.lot-details,
+.lot-form {
+  border-color: rgba(18, 42, 63, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(18, 35, 52, 0.065);
+}
+.listing {
+  padding: 8px 8px 0;
+}
+.listing-photo {
+  border-radius: 7px;
+  box-shadow: none;
+}
+.listing-heading h3 {
+  color: #153957;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.32rem;
+  font-weight: 600;
+}
+.tag,
+.status-tag,
+.pill,
+.pill.published {
+  border-radius: 5px;
+  box-shadow: 0 3px 9px rgba(8, 40, 72, 0.12);
+}
+.facts > span {
+  border-radius: 6px;
+  background: #e8edef;
+  box-shadow: none;
+}
+.gallery-main,
+.map-surface,
+.plan-scroll {
+  border-radius: 10px;
+  box-shadow: 0 16px 38px rgba(18, 35, 52, 0.1);
+}
+.public-footer {
+  border-color: #ccd2d7;
+}
+.about-values article,
+.about-contact {
+  border-radius: 10px;
+}
+
+/* Panel operativo */
+.admin-shell {
+  background: #f2f3f3;
+}
+.sidebar {
+  border-radius: 10px;
+  background: linear-gradient(180deg, #112f48 0%, #0b263d 100%);
+  box-shadow: 0 14px 34px rgba(6, 28, 45, 0.22);
+}
+.sidebar > .brand {
+  border-radius: 8px;
+  box-shadow: none;
+}
+.sidebar nav {
+  gap: 5px;
+}
+.sidebar nav button {
+  position: relative;
+  border-radius: 6px;
+  padding-block: 12px;
+}
+.sidebar nav button.active {
+  background: #a51f2a;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.14);
+}
+.admin-topbar {
+  border: 1px solid rgba(18, 42, 63, 0.09);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 7px 22px rgba(18, 35, 52, 0.045);
+}
+.admin-content h1 {
+  color: #102b43;
+  font-weight: 720;
+}
+.metrics > div,
+.sales-metrics > div,
+.start-actions button,
+.sale-card,
+.table-scroll,
+.editor fieldset,
+.receipt-card,
+.cash-card {
+  border-color: rgba(18, 42, 63, 0.11);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(18, 35, 52, 0.055);
+}
+.metrics > div,
+.sales-metrics > div {
+  border-top: 2px solid #244f70;
+}
+.metrics strong,
+.sales-metrics strong {
+  color: #123e60;
+}
+.start-actions span {
+  border-radius: 6px;
+  background: #e7ecef;
+  box-shadow: none;
+}
+.notice {
+  border-radius: 8px;
+  background: #e9eef1;
+  box-shadow: none;
+}
+.secondary,
+.lot-buttons button {
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 5px 14px rgba(18, 35, 52, 0.055);
+}
+.save-bar {
+  border: 1px solid rgba(18, 42, 63, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 -7px 24px rgba(18, 35, 52, 0.08);
+}
+.login-page > .brand,
+.login-box {
+  border-color: rgba(18, 42, 63, 0.11);
+  border-radius: 10px;
+  background: #fff;
+}
+
+@media (max-width: 760px) {
+  .public-header,
+  .editorial-hero .intro-photo,
+  .filters,
+  .listing,
+  .sidebar,
+  .admin-topbar {
+    border-radius: 8px;
+  }
+  .editorial-hero {
+    padding-top: 18px;
+    padding-bottom: 54px;
+  }
+  .editorial-hero h1 {
+    font-size: clamp(2.55rem, 11vw, 4rem);
+  }
+  .editorial-hero .intro-copy:before {
+    display: none;
+  }
+  .editorial-hero .intro-photo {
+    height: 310px;
+  }
+}
+
 /* Identidad editorial inmobiliaria y configuración administrable. */
 .brand-copy {
   display: flex;
@@ -2197,12 +2524,14 @@ textarea:focus-visible {
   --premium-muted: #607083;
   --premium-line: #d9e0e7;
   --premium-surface: #ffffff;
-  --premium-canvas: #f3f5f7;
+  --premium-canvas: #f3f4f2;
   --premium-shadow: 0 12px 34px rgba(13, 43, 67, 0.075);
 }
 body {
   color: var(--premium-ink);
-  background: var(--premium-canvas);
+  background:
+    radial-gradient(circle at 82% 8%, rgba(25, 66, 98, 0.045), transparent 28rem),
+    var(--premium-canvas);
 }
 .public-header,
 .admin-topbar,

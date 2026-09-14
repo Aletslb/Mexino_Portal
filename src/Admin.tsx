@@ -15,10 +15,13 @@ import type {
   Lot,
   Catalog,
   PortalSettings,
+  Owner,
+  BusinessData,
 } from "./model";
 import PlanView from "./PlanView";
 import SalesAdmin from "./SalesAdmin";
 import CashAdmin from "./CashAdmin";
+import OwnersAdmin, { PendingPanel } from "./OwnersAdmin";
 const MapView = lazy(() => import("./MapView"));
 type User = { email: string; role: string };
 type Audit = {
@@ -38,6 +41,7 @@ type ResetStatus = {
     payments: number;
     receipts: number;
     deliveries: number;
+    owners: number;
     cash: number;
     catalog: number;
   };
@@ -134,6 +138,51 @@ function Commission({
           onChange={(v) => change({ commissionValue: v })}
         />
       </div>
+    </fieldset>
+  );
+}
+function Ownership({
+  value,
+  owners,
+  change,
+}: {
+  value: { ownershipType: "Casa Mexino" | "Tercero"; ownerId: string };
+  owners: Owner[];
+  change: (v: { ownershipType?: "Casa Mexino" | "Tercero"; ownerId?: string }) => void;
+}) {
+  return (
+    <fieldset className="ownership-fieldset">
+      <legend>Propiedad y liquidación · uso interno</legend>
+      <div className="form-grid">
+        <Select
+          label="Titular del inmueble"
+          value={value.ownershipType}
+          options={["Casa Mexino", "Tercero"]}
+          onChange={(ownershipType) =>
+            change({
+              ownershipType: ownershipType as "Casa Mexino" | "Tercero",
+              ownerId: ownershipType === "Casa Mexino" ? "" : value.ownerId,
+            })
+          }
+        />
+        {value.ownershipType === "Tercero" && (
+          <Field label="Propietario">
+            <select
+              required
+              value={value.ownerId}
+              onChange={(e) => change({ ownerId: e.target.value })}
+            >
+              <option value="">Seleccionar propietario</option>
+              {owners.filter((owner) => owner.active || owner.id === value.ownerId).map((owner) => (
+                <option key={owner.id} value={owner.id}>{owner.name}{owner.phone ? ` · ${owner.phone}` : ""}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+      </div>
+      <p className="muted">
+        Dato privado. Define automáticamente a quién se acumulan los fondos cobrados.
+      </p>
     </fieldset>
   );
 }
@@ -611,6 +660,7 @@ function TestDataTools({ onReset }: { onReset: () => Promise<void> }) {
             </span>
             <span>
               <strong>{status.counts.deliveries}</strong> entregas
+              <strong>{status.counts.owners}</strong> propietarios
             </span>
             <span>
               <strong>{status.counts.cash}</strong> movimientos de caja
@@ -688,9 +738,11 @@ function TestDataTools({ onReset }: { onReset: () => Promise<void> }) {
 }
 function PropertyEditor({
   initial,
+  owners,
   onDone,
 }: {
   initial: Property;
+  owners: Owner[];
   onDone: () => void;
 }) {
   const [value, setValue] = useState(initial),
@@ -866,6 +918,7 @@ function PropertyEditor({
         </button>
       </fieldset>
       <Commission value={value} change={change} />
+      <Ownership value={value} owners={owners} change={(v) => change(v)} />
       {error && (
         <p className="error" role="alert">
           {error}
@@ -882,9 +935,11 @@ function PropertyEditor({
 }
 function DevelopmentEditor({
   initial,
+  owners,
   onDone,
 }: {
   initial: Development;
+  owners: Owner[];
   onDone: () => void;
 }) {
   const [value, setValue] = useState(initial),
@@ -1034,6 +1089,7 @@ function DevelopmentEditor({
         value={value}
         change={(v) => change(v as Partial<Development>)}
       />
+      <Ownership value={value} owners={owners} change={(v) => change(v)} />
       <fieldset disabled={busy}>
         <legend>Plano de lotificación</legend>
         <p className="muted">
@@ -1451,6 +1507,7 @@ export default function Admin() {
     [loading, setLoading] = useState(true),
     [authError, setAuthError] = useState(""),
     [data, setData] = useState<Catalog>(emptyCatalog),
+    [owners, setOwners] = useState<Owner[]>([]),
     [error, setError] = useState(""),
     [section, setSection] = useState("Resumen"),
     [query, setQuery] = useState(""),
@@ -1459,7 +1516,12 @@ export default function Admin() {
     [audit, setAudit] = useState<Audit[]>([]);
   async function reload() {
     try {
-      setData(await api<Catalog>("/api/admin/catalog"));
+      const [catalog, business] = await Promise.all([
+        api<Catalog>("/api/admin/catalog"),
+        api<BusinessData>("/api/admin/business"),
+      ]);
+      setData(catalog);
+      setOwners(business.owners);
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -1542,7 +1604,7 @@ export default function Admin() {
             "Clientes",
             "Ventas",
             ...(user.role === "Administrador"
-              ? ["Recibos", "Caja", "Ajustes", "Historial"]
+              ? ["Recibos", "Propietarios", "Caja", "Ajustes", "Historial"]
               : []),
           ].map((s) => (
             <button
@@ -1580,10 +1642,11 @@ export default function Admin() {
           )}
           {editor ? (
             section === "Propiedades" ? (
-              <PropertyEditor initial={editor as Property} onDone={done} />
+              <PropertyEditor initial={editor as Property} owners={owners} onDone={done} />
             ) : (
               <DevelopmentEditor
                 initial={editor as Development}
+                owners={owners}
                 onDone={done}
               />
             )
@@ -1596,6 +1659,8 @@ export default function Admin() {
             />
           ) : section === "Caja" ? (
             <CashAdmin />
+          ) : section === "Propietarios" ? (
+            <OwnersAdmin />
           ) : ["Clientes", "Ventas", "Recibos"].includes(section) ? (
             <SalesAdmin
               section={section as "Clientes" | "Ventas" | "Recibos"}
@@ -1687,6 +1752,7 @@ export default function Admin() {
                     Clientes, ventas, cobranza, recibos y entregas a
                     propietarios y caja operativa ya están disponibles.
                   </div>
+                  {user.role === "Administrador" && <PendingPanel catalog={data} />}
                 </>
               )}
               {section === "Ajustes" && (
@@ -1721,6 +1787,7 @@ export default function Admin() {
                           <th>
                             {section === "Propiedades" ? "Precio" : "Lotes"}
                           </th>
+                          <th>Titular</th>
                           <th>Publicación</th>
                           <th>Acciones</th>
                         </tr>
@@ -1748,6 +1815,13 @@ export default function Admin() {
                                   : data.lots.filter(
                                       (l) => l.developmentId === p.id,
                                     ).length}
+                              </td>
+                              <td>
+                                <span className={`ownership-badge ${p.ownershipType === "Tercero" ? "third-party" : "own"}`}>
+                                  {p.ownershipType === "Tercero"
+                                    ? owners.find((owner) => owner.id === p.ownerId)?.name || "Tercero"
+                                    : "Casa Mexino"}
+                                </span>
                               </td>
                               <td>
                                 <span

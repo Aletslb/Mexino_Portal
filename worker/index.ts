@@ -17,6 +17,7 @@ import type {
   CashMovement,
   CashClosing,
   CashData,
+  Owner,
 } from "../src/model";
 
 const json = (data: unknown, status = 200) =>
@@ -96,6 +97,17 @@ type CustomerRow = {
   created_at: string;
   updated_at: string;
 };
+type OwnerRow = {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+  notes: string;
+  active: number;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+};
 type SaleRow = {
   id: string;
   customer_id: string;
@@ -112,6 +124,8 @@ type SaleRow = {
   next_payment_date: string;
   commission_type: Sale["commissionType"];
   commission_value: number;
+  ownership_type: Sale["ownershipType"];
+  owner_id: string | null;
   owner_name: string;
   owner_phone: string;
   cancellation_notes: string;
@@ -243,6 +257,17 @@ const customerDto = (x: CustomerRow): Customer => ({
   createdAt: x.created_at,
   updatedAt: x.updated_at,
 });
+const ownerDto = (x: OwnerRow): Owner => ({
+  id: x.id,
+  name: x.name,
+  phone: x.phone,
+  address: x.address,
+  notes: x.notes,
+  active: Boolean(x.active),
+  revision: x.revision,
+  createdAt: x.created_at,
+  updatedAt: x.updated_at,
+});
 const saleDto = (x: SaleRow): Sale => ({
   id: x.id,
   customerId: x.customer_id,
@@ -259,6 +284,8 @@ const saleDto = (x: SaleRow): Sale => ({
   nextPaymentDate: x.next_payment_date,
   commissionType: x.commission_type,
   commissionValue: x.commission_value,
+  ownershipType: x.ownership_type,
+  ownerId: x.owner_id || "",
   ownerName: x.owner_name,
   ownerPhone: x.owner_phone,
   cancellationNotes: x.cancellation_notes,
@@ -349,12 +376,15 @@ async function business(
 ): Promise<BusinessData> {
   if (!env.DB)
     throw new Failure(503, "Clientes y ventas están pendientes de conexión.");
-  const [customers, sales, payments, deliveries, receipts] = await Promise.all([
+  const [owners, customers, sales, payments, deliveries, receipts] = await Promise.all([
+    env.DB.prepare(
+      "SELECT id,name,phone,address,notes,active,revision,created_at,updated_at FROM owners ORDER BY active DESC,name",
+    ).all<OwnerRow>(),
     env.DB.prepare(
       "SELECT id,name,phone,address,notes,revision,created_at,updated_at FROM customers ORDER BY updated_at DESC",
     ).all<CustomerRow>(),
     env.DB.prepare(
-      "SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,owner_name,owner_phone,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales ORDER BY updated_at DESC",
+      "SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,ownership_type,owner_id,owner_name,owner_phone,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales ORDER BY updated_at DESC",
     ).all<SaleRow>(),
     env.DB.prepare(
       "SELECT id,sale_id,amount,payment_date,payment_method,kind,reference,notes,status,cancellation_reason,revision,created_by,cancelled_by,created_at,cancelled_at FROM payments ORDER BY payment_date DESC,created_at DESC",
@@ -369,6 +399,7 @@ async function business(
     ).all<ReceiptRow>(),
   ]);
   return {
+    owners: owners.results.map(ownerDto),
     customers: customers.results.map(customerDto),
     sales: sales.results.map(saleDto),
     payments: payments.results.map(paymentDto),
@@ -529,6 +560,14 @@ function commission(v: Record<string, unknown>) {
       commissionType === "Porcentaje" ? 100 : 1e10,
     ),
   };
+}
+function ownership(v: Record<string, unknown>) {
+  const ownershipType = choice(v.ownershipType ?? "Casa Mexino", [
+    "Casa Mexino",
+    "Tercero",
+  ]);
+  const ownerId = ownershipType === "Tercero" ? identifier(v.ownerId) : "";
+  return { ownershipType, ownerId };
 }
 function date(v: unknown, required = false) {
   const value = text(v, 10, required);
@@ -696,6 +735,7 @@ export function validate(kind: string, v: Record<string, unknown>) {
       ]),
       publication,
       ...commission(v),
+      ...ownership(v),
     } as Property;
   }
   if (kind === "developments")
@@ -708,6 +748,7 @@ export function validate(kind: string, v: Record<string, unknown>) {
       publication: choice(v.publication, ["Borrador", "Publicado", "Oculto"]),
       collection: v.collection === true,
       ...commission(v),
+      ...ownership(v),
     } as Development;
   if (kind !== "lots") throw new Failure(404, "Sección no encontrada.");
   const polygon = v.polygon;
@@ -770,6 +811,15 @@ async function save(
     throw new Failure(400, "Datos no válidos.");
   }
   const value = validate(kind, input);
+  if (
+    kind !== "lots" &&
+    "ownershipType" in value &&
+    value.ownershipType === "Tercero" &&
+    !(await env.DB.prepare("SELECT id FROM owners WHERE id=? AND active=1")
+      .bind(value.ownerId)
+      .first())
+  )
+    throw new Failure(400, "Selecciona un propietario activo.");
   const old = await env.DB.prepare(
     "SELECT id,kind,data,revision FROM records WHERE id=?",
   )
@@ -923,6 +973,72 @@ async function saveCustomer(
     throw new Failure(409, "El cliente cambió mientras lo editabas.");
   return json({ ...value, revision: value.revision + 1 });
 }
+async function saveOwner(
+  request: Request,
+  env: Env,
+  user: { email: string; role: string },
+) {
+  if (user.role !== "Administrador")
+    throw new Failure(403, "Solo administradores pueden modificar propietarios.");
+  if (!env.DB) throw new Failure(503, "Propietarios pendientes de conexión.");
+  const v = await body(request);
+  const value: Owner = {
+    id: identifier(v.id),
+    revision: number(v.revision, 1e9),
+    name: text(v.name, 160, true),
+    phone: text(v.phone, 35),
+    address: text(v.address, 500),
+    notes: text(v.notes, 3000),
+    active: v.active !== false,
+  };
+  if (!Number.isInteger(value.revision))
+    throw new Failure(400, "Versión no válida.");
+  const old = await env.DB.prepare("SELECT revision FROM owners WHERE id=?")
+    .bind(value.id)
+    .first<{ revision: number }>();
+  if ((old && old.revision !== value.revision) || (!old && value.revision !== 0))
+    throw new Failure(409, "Otra persona actualizó este propietario.");
+  const mutation = old
+    ? env.DB.prepare(
+        "UPDATE owners SET name=?,phone=?,address=?,notes=?,active=?,revision=revision+1,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?",
+      ).bind(
+        value.name,
+        value.phone,
+        value.address,
+        value.notes,
+        value.active ? 1 : 0,
+        user.email,
+        value.id,
+        value.revision,
+      )
+    : env.DB.prepare(
+        "INSERT INTO owners(id,name,phone,address,notes,active,created_by,updated_by) VALUES(?,?,?,?,?,?,?,?)",
+      ).bind(
+        value.id,
+        value.name,
+        value.phone,
+        value.address,
+        value.notes,
+        value.active ? 1 : 0,
+        user.email,
+        user.email,
+      );
+  const result = await env.DB.batch([
+    mutation,
+    env.DB.prepare(
+      "INSERT INTO audit(id,record_id,actor,action,after_data) SELECT ?,?,?,?,? WHERE changes()=1",
+    ).bind(
+      crypto.randomUUID(),
+      value.id,
+      user.email,
+      old ? "Actualizar propietario" : "Crear propietario",
+      JSON.stringify(value),
+    ),
+  ]);
+  if (result[0].meta.changes !== 1)
+    throw new Failure(409, "El propietario cambió mientras lo editabas.");
+  return json({ ...value, revision: value.revision + 1 });
+}
 function inventoryData(
   row: { id: string; kind: RecordKind; data: string; revision: number },
   sale: Pick<Sale, "status" | "saleDate">,
@@ -976,6 +1092,11 @@ async function saveSale(
       v.commissionValue,
       commissionType === "Porcentaje" ? 100 : 1e10,
     ),
+    ownershipType: choice(v.ownershipType ?? "Casa Mexino", [
+      "Casa Mexino",
+      "Tercero",
+    ]),
+    ownerId: text(v.ownerId ?? "", 36),
     ownerName: text(v.ownerName ?? "", 160),
     ownerPhone: text(v.ownerPhone ?? "", 35),
     cancellationNotes: "",
@@ -1065,10 +1186,36 @@ async function saveSale(
     !["Disponible", "Apartado"].includes(String(JSON.parse(asset.data).status))
   )
     throw new Failure(409, "El inmueble seleccionado ya no está disponible.");
+  const assetData = JSON.parse(asset.data) as Property | Lot;
+  let ownershipSource: Property | Development = assetData as Property;
+  if (value.assetType === "Lote") {
+    const development = await env.DB.prepare(
+      "SELECT id,kind,data,revision FROM records WHERE id=? AND kind='developments'",
+    )
+      .bind((assetData as Lot).developmentId)
+      .first<Row>();
+    if (!development) throw new Failure(400, "Fraccionamiento no encontrado.");
+    ownershipSource = JSON.parse(development.data) as Development;
+  }
+  value.ownershipType = ownershipSource.ownershipType ?? "Casa Mexino";
+  value.ownerId = value.ownershipType === "Tercero" ? ownershipSource.ownerId : "";
+  if (value.ownershipType === "Tercero") {
+    const owner = await env.DB.prepare(
+      "SELECT id,name,phone,address,notes,active,revision,created_at,updated_at FROM owners WHERE id=? AND active=1",
+    )
+      .bind(value.ownerId)
+      .first<OwnerRow>();
+    if (!owner) throw new Failure(400, "El inmueble no tiene un propietario activo.");
+    value.ownerName = owner.name;
+    value.ownerPhone = owner.phone;
+  } else {
+    value.ownerName = "Casa Mexino";
+    value.ownerPhone = "";
+  }
   const inventory = inventoryData(asset, value, user.email),
     saleMutation = old
       ? env.DB.prepare(
-          "UPDATE sales SET customer_id=?,status=?,agreed_price=?,reservation_amount=?,down_payment=?,monthly_payment=?,term_months=?,payment_method=?,sale_date=?,next_payment_date=?,commission_type=?,commission_value=?,owner_name=?,owner_phone=?,revision=revision+1,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?",
+          "UPDATE sales SET customer_id=?,status=?,agreed_price=?,reservation_amount=?,down_payment=?,monthly_payment=?,term_months=?,payment_method=?,sale_date=?,next_payment_date=?,commission_type=?,commission_value=?,ownership_type=?,owner_id=?,owner_name=?,owner_phone=?,revision=revision+1,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=?",
         ).bind(
           value.customerId,
           value.status,
@@ -1082,6 +1229,8 @@ async function saveSale(
           value.nextPaymentDate,
           value.commissionType,
           value.commissionValue,
+          value.ownershipType,
+          value.ownerId || null,
           value.ownerName,
           value.ownerPhone,
           user.email,
@@ -1089,7 +1238,7 @@ async function saveSale(
           value.revision,
         )
       : env.DB.prepare(
-          "INSERT INTO sales(id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,owner_name,owner_phone,created_by,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO sales(id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,ownership_type,owner_id,owner_name,owner_phone,created_by,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         ).bind(
           value.id,
           value.customerId,
@@ -1106,6 +1255,8 @@ async function saveSale(
           value.nextPaymentDate,
           value.commissionType,
           value.commissionValue,
+          value.ownershipType,
+          value.ownerId || null,
           value.ownerName,
           value.ownerPhone,
           user.email,
@@ -1157,7 +1308,7 @@ async function registerPayment(
   if (!env.DB) throw new Failure(503, "Cobranza pendiente de conexión.");
   const v = await body(request);
   const saleRow = await env.DB.prepare(
-    "SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,owner_name,owner_phone,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales WHERE id=?",
+    "SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,ownership_type,owner_id,owner_name,owner_phone,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales WHERE id=?",
   )
     .bind(saleId)
     .first<SaleRow>();
@@ -1328,7 +1479,7 @@ async function registerOwnerDelivery(
   if (!env.DB) throw new Failure(503, "Entregas pendientes de conexión.");
   const v = await body(request);
   const saleRow = await env.DB.prepare(
-    "SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,owner_name,owner_phone,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales WHERE id=?",
+    "SELECT id,customer_id,asset_type,asset_id,status,agreed_price,reservation_amount,down_payment,monthly_payment,term_months,payment_method,sale_date,next_payment_date,commission_type,commission_value,ownership_type,owner_id,owner_name,owner_phone,cancellation_notes,cancellation_resolution,revision,created_at,updated_at FROM sales WHERE id=?",
   )
     .bind(saleId)
     .first<SaleRow>();
@@ -1755,6 +1906,7 @@ async function resetStatus(env: Env, user: { role: string }) {
     payments,
     receipts,
     deliveries,
+    owners,
     cash,
     records,
   ] = await Promise.all([
@@ -1776,6 +1928,9 @@ async function resetStatus(env: Env, user: { role: string }) {
     env.DB.prepare("SELECT COUNT(*) count FROM owner_deliveries").first<{
       count: number;
     }>(),
+    env.DB.prepare("SELECT COUNT(*) count FROM owners").first<{
+      count: number;
+    }>(),
     env.DB.prepare("SELECT COUNT(*) count FROM cash_movements").first<{
       count: number;
     }>(),
@@ -1793,6 +1948,7 @@ async function resetStatus(env: Env, user: { role: string }) {
       payments: payments?.count || 0,
       receipts: receipts?.count || 0,
       deliveries: deliveries?.count || 0,
+      owners: owners?.count || 0,
       cash: cash?.count || 0,
       catalog: records?.count || 0,
     },
@@ -1868,6 +2024,7 @@ async function resetTestData(
     statements.push(
       env.DB.prepare("DELETE FROM records"),
       env.DB.prepare("DELETE FROM uploads"),
+      env.DB.prepare("DELETE FROM owners"),
     );
   await env.DB.batch(statements);
   if (includeCatalog && env.BUCKET && uploadedObjects.results.length)
@@ -2094,6 +2251,8 @@ export default {
           return await saveSettings(request, env, user);
         if (path === "/api/admin/customers" && request.method === "PUT")
           return await saveCustomer(request, env, user);
+        if (path === "/api/admin/owners" && request.method === "PUT")
+          return await saveOwner(request, env, user);
         if (path === "/api/admin/sales" && request.method === "PUT")
           return await saveSale(request, env, user);
         const paymentRegistration = path.match(
